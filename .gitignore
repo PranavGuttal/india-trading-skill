@@ -1,0 +1,13 @@
+.env
+config/settings.yaml
+state/
+data/real/
+*.db
+*.sqlite
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+reports/private/

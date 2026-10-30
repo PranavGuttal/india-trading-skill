@@ -1,0 +1,12 @@
+# NSE trading holidays (equity segment), one list per year, ISO dates.
+# Fill this from the OFFICIAL NSE holiday circular for each year:
+#   https://www.nseindia.com/resources/exchange-communication-holidays
+# Deliberately left empty: holiday dates were not verified while building
+# this release, and wrong dates are worse than none. Until a year is listed,
+# `status` reports "holiday list not verified" and weekday holidays are not
+# detected.
+holidays: {}
+# example shape (NOT verified dates):
+# holidays:
+#   2026:
+#     - 2026-01-26

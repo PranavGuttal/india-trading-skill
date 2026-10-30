@@ -1,0 +1,50 @@
+# Copy to config/settings.yaml and edit. Environment variables override this file.
+# SAFE DEFAULTS: paper mode, live disabled, human approval required.
+
+trading_mode: paper            # paper | live  (live has NO adapter in this release)
+live_trading_enabled: false
+require_human_approval: true
+
+# Experimental budget enforced by THIS application only. It does not limit
+# your Groww account: the rest of your balance stays reachable with the same login.
+max_experimental_allocation_inr: 200
+max_single_order_value_inr: 200
+max_open_positions: 1
+max_risk_per_trade_inr: 10     # loss at stop INCLUDING estimated charges
+daily_loss_limit_inr: 20
+max_trades_per_day: 2
+min_reward_risk: 1.5
+min_reward_to_cost: 2.0        # planned gross reward must be >= 2x round-trip charges
+min_price_inr: 20              # skip penny stocks
+max_quote_age_seconds: 120
+max_bar_age_days: 5
+slippage_bps: 10
+product: delivery              # delivery | intraday
+
+allow_short_selling: false     # true is rejected by validation
+allow_derivatives: false       # true is rejected by validation
+allow_leverage: false          # true is rejected by validation
+
+data_dir: data/sample          # point at data/real once you have real adjusted CSVs
+state_dir: state
+watchlist: [SYNTH_TREND, SYNTH_CHOP, SYNTH_LARGE]
+
+# Charges: copied from https://groww.in/pricing on 2026-10-30. Re-verify and
+# update as_of before trusting them. Contract notes are the source of truth.
+charges:
+  source: https://groww.in/pricing
+  as_of: "2026-10-30"
+  brokerage_pct: 0.001
+  brokerage_cap_inr: 20
+  brokerage_min_inr: 5
+  stt_delivery_pct: 0.001
+  stt_intraday_sell_pct: 0.00025
+  stamp_delivery_buy_pct: 0.00015
+  stamp_intraday_buy_pct: 0.00003
+  exchange_txn_pct_nse: 0.0000297
+  sebi_turnover_pct: 0.000001
+  ipft_pct_nse: 0.000001
+  gst_pct: 0.18
+  dp_charge_depository_inr: 3.5
+  dp_charge_broker_inr: 16.5
+  dp_broker_waiver_below_inr: 100
