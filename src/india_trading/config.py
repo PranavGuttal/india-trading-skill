@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -62,6 +62,11 @@ class Settings(BaseModel):
     product: Literal["delivery", "intraday"] = "delivery"
     max_risk_per_trade_inr: float = Field(10.0, gt=0)
     daily_loss_limit_inr: float = Field(20.0, gt=0)
+    # Circuit breaker: None means 2x / 4x the daily limit.
+    weekly_loss_limit_inr: Optional[float] = Field(None, gt=0)
+    monthly_loss_limit_inr: Optional[float] = Field(None, gt=0)
+    max_consecutive_losses: int = Field(3, ge=1)
+    loss_cooldown_days: int = Field(2, ge=0)          # business days paused after that streak
     max_trades_per_day: int = Field(2, ge=1)
     min_reward_risk: float = Field(1.5, gt=0)
     # Planned reward must exceed round-trip costs by this multiple.
@@ -70,6 +75,8 @@ class Settings(BaseModel):
     max_quote_age_seconds: int = Field(120, ge=1)
     max_bar_age_days: int = Field(5, ge=1)            # for daily-bar research
     slippage_bps: float = Field(10.0, ge=0)
+    # Skip NEW entries when the watchlist's own breadth says RISK_OFF (exits still run).
+    regime_gate: bool = False
 
     data_dir: str = "data"
     state_dir: str = "state"
@@ -87,6 +94,14 @@ class Settings(BaseModel):
         if self.trading_mode == "live" and not self.require_human_approval:
             raise ValueError("live mode requires require_human_approval=true")
         return self
+
+    @property
+    def weekly_loss_limit(self) -> float:
+        return self.weekly_loss_limit_inr or 2 * self.daily_loss_limit_inr
+
+    @property
+    def monthly_loss_limit(self) -> float:
+        return self.monthly_loss_limit_inr or 4 * self.daily_loss_limit_inr
 
     @property
     def live_requested(self) -> bool:

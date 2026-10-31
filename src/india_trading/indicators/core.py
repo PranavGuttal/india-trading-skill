@@ -15,17 +15,17 @@ def ema(s: pd.Series, n: int) -> pd.Series:
     """EMA seeded with the SMA of the first n values (common charting convention)."""
     if n < 1:
         raise ValueError("n must be >= 1")
-    out = pd.Series(np.nan, index=s.index, dtype=float)
+    out = np.full(len(s), np.nan)
     if len(s) < n:
-        return out
+        return pd.Series(out, index=s.index)
     alpha = 2 / (n + 1)
     vals = s.to_numpy(dtype=float)
     prev = vals[:n].mean()
-    out.iloc[n - 1] = prev
+    out[n - 1] = prev
     for i in range(n, len(vals)):
         prev = alpha * vals[i] + (1 - alpha) * prev
-        out.iloc[i] = prev
-    return out
+        out[i] = prev
+    return pd.Series(out, index=s.index)
 
 
 def _wilder(values: np.ndarray, n: int) -> np.ndarray:

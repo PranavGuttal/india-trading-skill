@@ -7,9 +7,10 @@ intent id so the same intent can never create two orders.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Literal, Optional
+from typing import Callable, Iterator, Literal, Optional
 
 import pandas as pd
 
@@ -17,7 +18,7 @@ from ..config import ChargeSchedule
 from ..market_data.calendar import IST
 from ..models import Order, OrderIntent, OrderStatus, Position, Quote, Side
 from ..risk.costs import estimate_charges
-from ..risk.manager import AccountState
+from ..risk.manager import AccountState, pnl_history_stats
 from .base import BrokerAdapter, BrokerTimeout, UnsupportedOperation
 
 FillModel = Literal["full", "partial", "reject"]
@@ -64,10 +65,16 @@ class PaperBroker(BrokerAdapter):
             if c.execute("SELECT COUNT(*) FROM account").fetchone()[0] == 0:
                 c.execute("INSERT INTO account (id, cash) VALUES (1, ?)", (float(starting_cash),))
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, and always close (Windows keeps open files locked)."""
         c = sqlite3.connect(self.db_path)
         c.row_factory = sqlite3.Row
-        return c
+        try:
+            with c:
+                yield c
+        finally:
+            c.close()
 
     # ------------------------------------------------------------------ data
     def get_quote(self, symbol: str) -> Quote:
@@ -114,6 +121,7 @@ class PaperBroker(BrokerAdapter):
                 "SELECT COUNT(*) FROM orders WHERE trade_date=? AND side='BUY' AND filled_qty>0", (trade_date,)
             ).fetchone()[0]
         positions = self.get_positions()
+        history = pnl_history_stats(((t["trade_date"], t["pnl_net"]) for t in self.closed_trades()), trade_date)
         return AccountState(
             cash_available=self.cash(),
             open_positions=len(positions),
@@ -124,6 +132,7 @@ class PaperBroker(BrokerAdapter):
             source="paper",
             open_symbols={p.symbol for p in positions},
             pending_intent_ids={r[0] for r in pending} | {r[0] for r in today},
+            **history,
         )
 
     def get_order_status(self, intent_id: str) -> Optional[Order]:

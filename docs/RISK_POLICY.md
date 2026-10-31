@@ -14,6 +14,9 @@ blocked (fail closed).
 | MAX_OPEN_POSITIONS | 1 |
 | max_risk_per_trade_inr (incl. charges) | 10 |
 | daily_loss_limit_inr | 20 |
+| weekly / monthly loss limit | 2× / 4× daily (₹40 / ₹80) unless set |
+| max_consecutive_losses → loss_cooldown_days | 3 → 2 business days |
+| regime_gate (autopilot only) | false |
 | max_trades_per_day | 2 |
 | min_reward_risk | 1.5 |
 | min_reward_to_cost | 2.0 |
@@ -43,9 +46,16 @@ the strategy, or accept that real trading at ₹200 is mostly paying charges.
 kill switch → NO_TRADE → quote present/symbol match → delayed/stale/future
 quote → penny floor → >2% price drift → price at/below stop → session open →
 account verified → already holding → max positions (incl. pending) → max
-trades/day → daily loss limit → cost-aware qty (budget, order cap, risk incl.
+trades/day → daily loss limit → weekly loss limit → monthly loss limit →
+losing-streak cooldown → cost-aware qty (budget, order cap, risk incl.
 charges, cash) → reward:risk → reward vs 2× charges → net reward > 0 →
-remaining daily allowance → duplicate intent.
+remaining daily/weekly/monthly allowance → duplicate intent.
+
+## Autopilot (paper only)
+The autopilot approves paper entries automatically, but every entry still
+goes through all checks above. `AutoPilot` refuses a live adapter in its
+constructor. Exits (stop, target, close < SMA50, max hold) are not blocked by
+entry limits or the kill switch, because they only reduce risk.
 
 ## Limits of these controls
 They do **not** guarantee a loss can't exceed plan. Gaps through a stop,

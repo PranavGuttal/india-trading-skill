@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
+import pandas as pd
+
 from ..brokers.base import BrokerAdapter
 from ..config import Settings
 from ..execution.executor import Approval, ExecutionAgent, ExecutionRefused
@@ -62,6 +64,9 @@ class Supervisor:
         self.strategy = strategy
         self.risk = RiskManager(settings)
         self.exec = ExecutionAgent(settings, broker, journal)
+        # symbol -> (df, validation report, source, indicators) loaded once by a replay.
+        # Indicators are causal, so slicing them by row count equals recomputing.
+        self.preloaded: dict[str, tuple] = {}
 
     @property
     def mode(self) -> str:
@@ -69,12 +74,18 @@ class Supervisor:
 
     def analyze(self, symbol: str, csv_path: Path, today: date, as_of: Optional[date] = None) -> RunState:
         st = RunState(symbol)
-        try:
-            df, rep, source = load_csv(csv_path, symbol, self.calendar)
-        except DataError as e:
-            return st.halt(f"data: {e}")
+        ind = None
+        if symbol in self.preloaded:
+            df, rep, source, ind = self.preloaded[symbol]
+        else:
+            try:
+                df, rep, source = load_csv(csv_path, symbol, self.calendar)
+            except DataError as e:
+                return st.halt(f"data: {e}")
         if as_of is not None:
-            df = df[df["date"].dt.date <= as_of].reset_index(drop=True)
+            n = int(df["date"].searchsorted(pd.Timestamp(as_of), side="right"))
+            df = df.iloc[:n]
+            ind = ind.iloc[:n] if ind is not None else None
             if df.empty:
                 return st.halt(f"no bars on or before {as_of}")
             source += f" [replay as of {as_of}]"
@@ -84,7 +95,7 @@ class Supervisor:
         st.log += [f"data warning: {w}" for w in rep.warnings]
         stale = is_stale(df, today, self.s.max_bar_age_days)
         st.step = Step.ANALYZE
-        prop = self.strategy(df, symbol, source)
+        prop = self.strategy(df, symbol, source) if ind is None else self.strategy(df, symbol, source, indicators=ind)
         if stale and prop.decision == "TRADE":
             prop = TradeProposal(decision="NO_TRADE", symbol=symbol, strategy=prop.strategy,
                                  strategy_version=prop.strategy_version, as_of=prop.as_of, data_source=source,

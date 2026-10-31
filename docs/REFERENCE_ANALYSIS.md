@@ -21,7 +21,11 @@ credited here.
 | Workflow manifests with `when_to_run` / `when_not_to_run` and a regime gate | `workflows/swing-opportunity-daily.yaml` | **Adapted**: the Supervisor state machine is the gate order; regime gate deferred until a verified India VIX/breadth source exists |
 | Position sizer as pure calculation | `skills/position-sizer/scripts/position_sizer.py` | **Adapted** into `RiskManager.size_position` + cost-aware reduction |
 | Pre-trade discipline gate that journals the decision | `skills/pre-trade-discipline-gate` | **Adapted**: every RISK_BLOCKED / APPROVED is journalled |
-| Drawdown circuit breaker (daily loss, streak cooldown) | `skills/drawdown-circuit-breaker` | **Partly adapted**: daily loss limit + kill switch. Losing-streak cooldown and weekly/monthly halts are on the roadmap |
+| Drawdown circuit breaker (daily loss, streak cooldown) | `skills/drawdown-circuit-breaker` | **Adapted**: daily, weekly and monthly loss limits, losing-streak cooldown, kill switch — in `RiskManager`, applied in paper, backtest and replay |
+| Breadth / uptrend analysers | `skills/market-breadth-analyzer`, `uptrend-analyzer` | **Adapted** as watchlist-only breadth + optional autopilot regime gate (`analysis/breadth.py`); no NSE-wide source yet |
+| Performance coach / signal postmortem | `skills/trade-performance-coach`, `signal-postmortem` | **Adapted** as `review` (`journal/review.py`) |
+| Second-opinion subagent | `agents/strategy-reviewer.md` | **Adapted** as `agents/india-strategy-critic.md`; plus `india-risk-auditor` |
+| Navigator skill | `skills/trading-skills-navigator` | **Adapted** as `india-trading-navigator` |
 | Thesis lifecycle memory + postmortem | `skills/trader-memory-core` | **Adapted** into an event journal + notes table |
 | Backtest critique ("beat ideas to death", sample size, overfitting) | `skills/backtest-expert` | **Reused conceptually**: train/test split, 30-trade minimum, baseline, INCONCLUSIVE verdicts |
 
@@ -33,7 +37,8 @@ credited here.
 | Explicit per-order "yes" that rejects "ok/sure/yes to all" | `trader-broker/ticket.py::parse_yes` | **Adapted** in `executor.Approval.is_explicit_yes` |
 | Loss measured from the worse of plan entry and fresh price | `trader-risk/check.py` | **Reused conceptually** (`entry = max(plan, quote)`) |
 | Exit planner: stop/target set before entry | `trader-exit/exit.py` | **Adapted** into the strategy proposal |
-| Monte-Carlo "time machine" | `trader-timemachine/timemachine.py` | **Omitted for now** (roadmap) — the event backtester comes first |
+| Monte-Carlo "time machine" | `trader-timemachine/timemachine.py` | **Adapted** to daily NSE bars + Groww charges (`simulation/timemachine.py`, `india-time-machine`) |
+| Broker step driven by Claude through an MCP connector | README (Alpaca MCP) | **Adapted, paper only**: Claude reads Groww prices read-only and runs `autopilot --prices`; orders stay simulated |
 | Pelosi / SEC / Nasdaq scanners | `trader-pelosi`, `trader-news`, `trader-scanner` | **Omitted**: US-only data sources |
 | Paper by default, keys in env, never in chat | README "Fine print" | **Reused** |
 

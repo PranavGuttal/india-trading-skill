@@ -13,17 +13,24 @@ from pathlib import Path
 
 import pandas as pd
 
+from .analysis.breadth import compute as compute_breadth, format_breadth
 from .backtesting.engine import format_report, run_backtest
 from .brokers.paper_broker import PaperBroker
 from .config import ConfigError, Settings, load_settings
+from .journal.review import format_review, review
 from .journal.store import Journal
 from .logging_setup import setup_logging
 from .market_data.calendar import IST, NSECalendar
 from .market_data.csv_source import DataError, load_csv
+from .market_data.importer import import_csv
 from .models import OrderIntent, Quote, Side
 from .monitoring.monitor import Monitor
-from .risk.manager import KillSwitch
+from .risk.costs import estimate_charges
+from .risk.manager import KillSwitch, RiskManager
+from .simulation.replay import format_replay, run_replay
+from .simulation.timemachine import format_result, simulate
 from .strategies import ma_trend
+from .workflows.autopilot import AutoPilot, format_tick
 from .workflows.supervisor import Step, Supervisor
 
 PAPER_BANNER = "[PAPER MODE — simulated only, nothing is sent to Groww]"
@@ -59,6 +66,18 @@ def _quote_and_now(args, df: pd.DataFrame, symbol: str):
     now = datetime.combine(d, time(15, 20), tzinfo=IST)
     q = Quote(symbol=symbol, price=float(df["close"].iloc[-1]), timestamp=now, source="replay:last-close (NOT live)")
     return q, now, True
+
+
+def _study(s: Settings, args) -> Settings:
+    """--capital: a larger PAPER budget to study the strategy. Never a suggestion to trade that amount."""
+    if not getattr(args, "capital", None):
+        return s
+    risk = args.risk or args.capital * 0.01
+    return s.model_copy(update={
+        "max_experimental_allocation_inr": args.capital, "max_single_order_value_inr": args.capital,
+        "max_risk_per_trade_inr": risk, "daily_loss_limit_inr": min(args.capital, risk * 3),
+        "weekly_loss_limit_inr": None, "monthly_loss_limit_inr": None,
+    })
 
 
 # ---------------------------------------------------------------- commands
@@ -136,12 +155,7 @@ def cmd_scan(args):
 
 def cmd_backtest(args):
     s, cal, _ = _ctx(args)
-    if args.capital:
-        s = s.model_copy(update={
-            "max_experimental_allocation_inr": args.capital, "max_single_order_value_inr": args.capital,
-            "max_risk_per_trade_inr": args.risk or args.capital * 0.01,
-            "daily_loss_limit_inr": min(args.capital, (args.risk or args.capital * 0.01) * 3),
-        })
+    s = _study(s, args)
     path = _data_path(s, args, args.symbol)
     df, rep, src = load_csv(path, args.symbol, cal)
     if not rep.ok:
@@ -283,6 +297,147 @@ def cmd_monitor(args):
     print(Path(m.heartbeat).read_text(encoding="utf-8"))
 
 
+def cmd_timemachine(args):
+    s, cal, _ = _ctx(args)
+    sym = args.symbol.upper()
+    df, rep, src = load_csv(_data_path(s, args, sym), sym, cal)
+    if not rep.ok:
+        print("INVALID DATA:", rep.errors)
+        return 2
+    if args.as_of:
+        df = df[df["date"].dt.date <= pd.Timestamp(args.as_of).date()].reset_index(drop=True)
+    levels = (args.entry, args.stop, args.target)
+    if None in levels:
+        if any(v is not None for v in levels):
+            print("Give all of --entry, --stop and --target, or none (then the strategy's plan is used).")
+            return 2
+        p = ma_trend.evaluate(df, sym, src)
+        if p.decision != "TRADE":
+            print(f"{sym}: strategy says NO_TRADE as of {p.as_of:%Y-%m-%d} ({'; '.join(p.reasons)[:160]}).")
+            print("Nothing to simulate. To test your own plan pass --entry --stop --target.")
+            return 1
+        levels = (p.entry, p.stop, p.target)
+    entry, stop, target = levels
+    qty = args.qty or RiskManager(s).size_position(entry, stop)
+    if qty < 1:
+        print(f"NOTE: at the ₹{s.max_experimental_allocation_inr:.0f} budget the risk manager sizes 0 shares; simulating 1 share.")
+        qty = 1
+    try:
+        r = simulate(df, sym, entry, stop, target, s, qty=qty, max_hold_days=args.hold, paths=args.paths,
+                     lookback=args.lookback, seed=args.seed, data_source=src)
+    except ValueError as e:
+        print("CANNOT SIMULATE:", e)
+        return 2
+    print(format_result(r))
+    return 0
+
+
+def _parse_prices(text: str, source: str) -> dict[str, Quote]:
+    now = datetime.now(IST)
+    out = {}
+    for part in filter(None, (x.strip() for x in text.split(","))):
+        sym, _, px = part.partition("=")
+        out[sym.strip().upper()] = Quote(symbol=sym.strip().upper(), price=float(px), timestamp=now,
+                                         source=f"manual:{source}")
+    return out
+
+
+def cmd_autopilot(args):
+    s, cal, journal = _ctx(args)
+    s = s.model_copy(update={"data_dir": args.data_dir or s.data_dir})
+    pilot = AutoPilot(s, _broker(s), journal, cal, s.data_dir)
+    print(PAPER_BANNER)
+    if args.prices:
+        quotes, now, as_of = _parse_prices(args.prices, args.price_source), datetime.now(IST), None
+    else:
+        frames = pilot.load_frames()
+        if not frames:
+            print(f"No valid watchlist CSVs in {s.data_dir}.")
+            return 1
+        last = max(df["date"].iloc[-1].date() for df in frames.values())
+        now, as_of = datetime.combine(last, time(15, 20), tzinfo=IST), last
+        quotes = {sym: Quote(symbol=sym, price=float(df["close"].iloc[-1]), timestamp=now,
+                             source="replay:last-close (NOT live)")
+                  for sym, df in frames.items() if df["date"].iloc[-1].date() == last}
+        print(f"REPLAY TICK as of {last} 15:20 IST using last closes — not live prices.")
+    print(format_tick(pilot.tick(now, quotes, as_of=as_of)))
+    return 0
+
+
+def cmd_replay(args):
+    s, cal, _ = _ctx(args)
+    s = _study(s, args)
+    if args.symbols:
+        s = s.model_copy(update={"watchlist": [x.strip().upper() for x in args.symbols.split(",") if x.strip()]})
+    start = pd.Timestamp(args.start).date() if args.start else None
+    end = pd.Timestamp(args.end).date() if args.end else None
+    try:
+        r = run_replay(s, args.data_dir or s.data_dir, start, end, args.out or s.state_path("replay"), cal)
+    except ValueError as e:
+        print("CANNOT REPLAY:", e)
+        return 2
+    print(PAPER_BANNER)
+    print(format_replay(r))
+    return 0
+
+
+def cmd_breadth(args):
+    s, cal, _ = _ctx(args)
+    frames = {}
+    for f in sorted(Path(args.data_dir or s.data_dir).glob("*.csv")):
+        try:
+            df, rep, _ = load_csv(f, f.stem, cal)
+        except DataError:
+            continue
+        if rep.ok:
+            frames[f.stem] = df
+    as_of = pd.Timestamp(args.as_of).date() if args.as_of else None
+    print(format_breadth(compute_breadth(frames, as_of)))
+    return 0
+
+
+def cmd_review(args):
+    s, _, journal = _ctx(args)
+    print(format_review(review(_broker(s).closed_trades(), journal.events(mode="paper", limit=1_000_000))))
+    return 0
+
+
+def cmd_costs(args):
+    s, _, _ = _ctx(args)
+    value = args.price * args.qty
+    lines = [f"CHARGES ({args.product}) for {args.qty} x ₹{args.price:.2f} = ₹{value:.2f} | "
+             f"schedule {s.charges.source} as of {s.charges.as_of}"]
+    total = 0.0
+    for side in ("BUY", "SELL"):
+        b = estimate_charges(value, side, args.product, s.charges)
+        total += b.total
+        lines.append(f"  {side:4} ₹{b.total:.2f}  (brokerage {b.brokerage:.2f}, STT {b.stt:.2f}, stamp {b.stamp:.2f}, "
+                     f"exchange {b.exchange:.2f}, SEBI {b.sebi:.4f}, IPFT {b.ipft:.4f}, DP {b.dp:.2f}, GST {b.gst:.2f})")
+    lines.append(f"  Round trip ≈ ₹{total:.2f} = {total / value:.1%} of the position. "
+                 f"Break-even move ≈ ₹{total / args.qty:.2f}/share.")
+    if args.stop is not None and args.target is not None:
+        risk = args.qty * (args.price - args.stop) + total
+        reward = args.qty * (args.target - args.price) - total
+        lines.append(f"  Loss at stop incl. charges ₹{risk:.2f} | reward at target after charges ₹{reward:.2f}"
+                     f" | limit per trade ₹{s.max_risk_per_trade_inr:.2f}")
+    lines.append("  Estimates only; the contract note is the source of truth.")
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_data_import(args):
+    s, cal, _ = _ctx(args)
+    try:
+        out, warnings = import_csv(args.file, args.symbol, args.out, args.source, cal, args.series)
+    except (DataError, FileNotFoundError) as e:
+        print("IMPORT FAILED:", e)
+        return 2
+    print(f"wrote {out} (source={args.source})")
+    for w in warnings:
+        print("  warning:", w)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="india_trading", description="NSE research + paper-trading toolkit (no live orders).")
     ap.add_argument("--config", default="config/settings.yaml", help="YAML settings (optional)")
@@ -325,6 +480,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["start", "stop"]); p.add_argument("--interval", type=int, default=300)
     p.add_argument("--ticks", type=int, help="stop after N ticks"); p.add_argument("--data-dir")
     p.set_defaults(fn=cmd_monitor)
+    p = sub.add_parser("timemachine", help="Monte-Carlo odds of one long plan (stop vs target) from the stock's own daily bars")
+    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--as-of")
+    p.add_argument("--entry", type=float); p.add_argument("--stop", type=float); p.add_argument("--target", type=float)
+    p.add_argument("--qty", type=int, help="default: what the risk manager would size")
+    p.add_argument("--hold", type=int, default=ma_trend.PARAMS.max_hold_days, help="max hold days")
+    p.add_argument("--paths", type=int, default=10_000); p.add_argument("--lookback", type=int, default=250)
+    p.add_argument("--seed", type=int, default=19); p.set_defaults(fn=cmd_timemachine)
+    p = sub.add_parser("autopilot", help="one unattended PAPER tick: manage exits, then auto-approved paper entries")
+    p.add_argument("--data-dir")
+    p.add_argument("--prices", help="current prices, e.g. INFY=1520.5,TCS=3901 (omit for a replay tick at the last close)")
+    p.add_argument("--price-source", default="user-entered", help="where --prices came from, e.g. groww-mcp")
+    p.set_defaults(fn=cmd_autopilot)
+    p = sub.add_parser("replay", help="run the paper autopilot day by day over past data (separate state)")
+    p.add_argument("--data-dir"); p.add_argument("--start"); p.add_argument("--end")
+    p.add_argument("--symbols", help="comma list; default: watchlist")
+    p.add_argument("--capital", type=float); p.add_argument("--risk", type=float)
+    p.add_argument("--out", help="output folder (default state/replay; replaced each run)")
+    p.set_defaults(fn=cmd_replay)
+    p = sub.add_parser("breadth", help="watchlist breadth and regime (not NSE-wide)")
+    p.add_argument("--data-dir"); p.add_argument("--as-of"); p.set_defaults(fn=cmd_breadth)
+    sub.add_parser("review", help="performance review of closed paper trades + journal").set_defaults(fn=cmd_review)
+    p = sub.add_parser("costs", help="Groww charge breakdown and break-even for a trade size")
+    p.add_argument("price", type=float); p.add_argument("--qty", type=int, default=1)
+    p.add_argument("--product", choices=["delivery", "intraday"], default="delivery")
+    p.add_argument("--stop", type=float); p.add_argument("--target", type=float); p.set_defaults(fn=cmd_costs)
+    p = sub.add_parser("data-import", help="normalise an exported daily-candle CSV into data/real/SYMBOL.csv")
+    p.add_argument("file"); p.add_argument("symbol")
+    p.add_argument("--source", required=True, help="where the file came from, e.g. nse-historical, groww-mcp")
+    p.add_argument("--out", default="data/real"); p.add_argument("--series", default="EQ")
+    p.set_defaults(fn=cmd_data_import)
     return ap
 
 

@@ -23,7 +23,7 @@ from ..indicators.core import add_indicators
 from ..market_data.calendar import IST
 from ..models import Quote, TradeProposal
 from ..risk.costs import estimate_charges, roundtrip_costs
-from ..risk.manager import AccountState, KillSwitch, RiskManager
+from ..risk.manager import AccountState, KillSwitch, RiskManager, block_reason_key, pnl_history_stats
 
 MIN_TRADES_FOR_EVIDENCE = 30
 
@@ -169,13 +169,14 @@ def run_backtest(
             signals += 1
             as_of = datetime.combine(d.date(), time(15, 30), tzinfo=IST)
             quote = Quote(symbol=symbol, price=float(row["close"]), timestamp=as_of, source="backtest-close")
+            history = pnl_history_stats(((tr.exit_date, tr.pnl_net) for tr in trades), str(d.date()))
             acct = AccountState(cash_available=cash, open_positions=0, pending_orders=0,
-                                realised_pnl_today=0.0, trades_today=0, verified=True, source="backtest")
+                                realised_pnl_today=0.0, trades_today=0, verified=True, source="backtest", **history)
             dec = rm.evaluate(prop, quote, acct, now=as_of, trade_date=str(d.date()), session_open=True)
             if not dec.approved:
                 blocked += 1
                 for r in dec.reasons:
-                    key = r.split("₹")[0].split("(")[0].strip()[:60]
+                    key = block_reason_key(r)
                     reasons[key] = reasons.get(key, 0) + 1
                 continue
             nxt = df.iloc[t + 1]

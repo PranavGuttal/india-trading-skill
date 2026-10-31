@@ -12,6 +12,11 @@ max_single_order_value_inr: 200
 max_open_positions: 1
 max_risk_per_trade_inr: 10     # loss at stop INCLUDING estimated charges
 daily_loss_limit_inr: 20
+# Circuit breaker (stricter only). Blank weekly/monthly = 2x / 4x the daily limit.
+weekly_loss_limit_inr:
+monthly_loss_limit_inr:
+max_consecutive_losses: 3      # after this many losing trades in a row...
+loss_cooldown_days: 2          # ...no new entries for this many business days
 max_trades_per_day: 2
 min_reward_risk: 1.5
 min_reward_to_cost: 2.0        # planned gross reward must be >= 2x round-trip charges
@@ -20,6 +25,7 @@ max_quote_age_seconds: 120
 max_bar_age_days: 5
 slippage_bps: 10
 product: delivery              # delivery | intraday
+regime_gate: false             # true = autopilot skips new entries while watchlist breadth is RISK_OFF
 
 allow_short_selling: false     # true is rejected by validation
 allow_derivatives: false       # true is rejected by validation

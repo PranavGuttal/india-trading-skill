@@ -1,0 +1,11 @@
+{
+  "name": "india-trading",
+  "owner": { "name": "Pranav Guttal" },
+  "plugins": [
+    {
+      "name": "india-trading-skill",
+      "source": "./",
+      "description": "NSE research, risk control and PAPER trading with Groww charges. No live order path."
+    }
+  ]
+}

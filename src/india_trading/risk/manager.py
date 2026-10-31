@@ -6,10 +6,13 @@ unknown position) BLOCKS the order rather than letting it through.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
+
+import numpy as np
 
 from ..config import Settings
 from ..models import OrderIntent, Quote, RiskDecision, Side, TradeProposal
@@ -29,6 +32,34 @@ class AccountState:
     source: str = "paper"
     open_symbols: set[str] = field(default_factory=set)
     pending_intent_ids: set[str] = field(default_factory=set)
+    # circuit-breaker inputs (see pnl_history_stats)
+    losing_streak: int = 0
+    last_loss_date: Optional[str] = None
+    realised_pnl_week: float = 0.0
+    realised_pnl_month: float = 0.0
+
+
+def pnl_history_stats(closed: Iterable[tuple[str, float]], trade_date: str) -> dict:
+    """From (trade_date, net P&L) of closed trades in order: the current losing
+    streak, the date of the last loss, and this ISO week's / month's net P&L."""
+    closed = list(closed)
+    d = date.fromisoformat(trade_date)
+    streak, last_loss = 0, None
+    for td, pnl in reversed(closed):
+        if pnl >= 0:
+            break
+        streak += 1
+        last_loss = last_loss or td
+    week = sum(p for td, p in closed if date.fromisoformat(td).isocalendar()[:2] == d.isocalendar()[:2])
+    month = sum(p for td, p in closed if td[:7] == trade_date[:7])
+    return {"losing_streak": streak, "last_loss_date": last_loss,
+            "realised_pnl_week": round(week, 2), "realised_pnl_month": round(month, 2)}
+
+
+def block_reason_key(reason: str) -> str:
+    """Group block reasons for counting: drop amounts, numbers and dates."""
+    key = re.sub(r"\d[\d,.:-]*", "N", reason.split("₹")[0].split("(")[0])
+    return key.strip()[:60]
 
 
 class KillSwitch:
@@ -123,6 +154,15 @@ class RiskManager:
             block.append(f"max trades per day reached ({s.max_trades_per_day})")
         if -account.realised_pnl_today >= s.daily_loss_limit_inr:
             block.append(f"daily loss limit ₹{s.daily_loss_limit_inr:.0f} reached; new trades halted")
+        if -account.realised_pnl_week >= s.weekly_loss_limit:
+            block.append(f"weekly loss limit ₹{s.weekly_loss_limit:.0f} reached; new trades halted this week")
+        if -account.realised_pnl_month >= s.monthly_loss_limit:
+            block.append(f"monthly loss limit ₹{s.monthly_loss_limit:.0f} reached; new trades halted this month")
+        if account.losing_streak >= s.max_consecutive_losses and account.last_loss_date:
+            paused = int(np.busday_count(account.last_loss_date, trade_date))
+            if paused < s.loss_cooldown_days:
+                block.append(f"{account.losing_streak} losses in a row: cooling off for {s.loss_cooldown_days} "
+                             f"business days after {account.last_loss_date}")
 
         # --- sizing with costs
         entry = max(proposal.entry, quote.price)  # measure risk from the worse price
@@ -159,9 +199,11 @@ class RiskManager:
             )
         if reward_net <= 0:
             block.append("planned reward is negative after charges")
-        remaining_today = s.daily_loss_limit_inr + min(0.0, account.realised_pnl_today)
+        remaining_today = min(s.daily_loss_limit_inr + min(0.0, account.realised_pnl_today),
+                              s.weekly_loss_limit + min(0.0, account.realised_pnl_week),
+                              s.monthly_loss_limit + min(0.0, account.realised_pnl_month))
         if risk_inr > remaining_today:
-            block.append(f"risk ₹{risk_inr:.2f} exceeds remaining daily loss allowance ₹{remaining_today:.2f}")
+            block.append(f"risk ₹{risk_inr:.2f} exceeds remaining daily/weekly/monthly loss allowance ₹{remaining_today:.2f}")
 
         intent = OrderIntent(
             symbol=proposal.symbol, side=Side.BUY, qty=qty, limit_price=round(entry, 2),

@@ -18,6 +18,11 @@ calendar      ma_trend         + costs.py)    executor.py    CSV export,
                                               ├ PaperBroker  (SQLite, idempotent)
                                               └ GrowwAdapter (raises Unsupported)
 Monitor (monitoring/monitor.py): read-only polling, heartbeat, stop file, kill switch.
+AutoPilot (workflows/autopilot.py): exits, optional regime gate, then Supervisor
+  entries with automatic PAPER approval; refuses live adapters.
+Replay (simulation/replay.py): AutoPilot once per past day, separate state dir.
+Time machine (simulation/timemachine.py): Monte-Carlo odds of one plan.
+Breadth (analysis/breadth.py) and Review (journal/review.py): pure reporting.
 Backtester (backtesting/engine.py): same strategy + same RiskManager, next-bar fills.
 ```
 
@@ -40,3 +45,6 @@ Backtester (backtesting/engine.py): same strategy + same RiskManager, next-bar f
 5. Indicators at row t are identical whether or not later rows exist.
 6. Backtest fills happen on the next bar; tampering with later bars cannot
    change an earlier entry.
+7. The autopilot cannot be constructed with a live adapter, and its entries
+   pass the same RiskManager (kill switch, cooldown and limits included).
+8. A replay never writes to `state/paper.db` and is deterministic.

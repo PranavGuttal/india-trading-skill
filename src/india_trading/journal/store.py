@@ -6,9 +6,10 @@ import csv
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Iterator, Literal, Optional
 
 Mode = Literal["paper", "live", "backtest"]
 
@@ -52,16 +53,26 @@ def redact(obj: Any) -> Any:
 
 
 class Journal:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, durable: bool = True):
+        """durable=False skips fsync: only for throwaway replay journals."""
         self.db_path = Path(db_path)
+        self.durable = durable
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, and always close (Windows keeps open files locked)."""
         c = sqlite3.connect(self.db_path)
         c.row_factory = sqlite3.Row
-        return c
+        if not self.durable:
+            c.execute("PRAGMA synchronous=OFF")
+        try:
+            with c:
+                yield c
+        finally:
+            c.close()
 
     def record(
         self, kind: str, mode: Mode, summary: str = "", symbol: Optional[str] = None,
