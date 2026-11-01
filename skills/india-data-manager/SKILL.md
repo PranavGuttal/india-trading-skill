@@ -12,6 +12,8 @@ description: >-
 # india-data-manager
 
 ```bash
+python -m india_trading.cli data-fetch INFY TCS RELIANCE --years 5          # real NSE daily candles from the internet
+python -m india_trading.cli data-fetch                                     # every watchlist symbol
 python -m india_trading.cli data-import exports/INFY.csv INFY --source nse-historical
 python -m india_trading.cli data-import groww_infy.csv INFY --source groww-mcp --out data/real
 python -m india_trading.cli scan --data-dir data/real          # validation warnings per file
@@ -19,6 +21,16 @@ python -m india_trading.cli market-check                      # holiday-list sta
 ```
 
 Then set `data_dir: data/real` and the `watchlist` in `config/settings.yaml`.
+
+## Which source
+
+1. `data-fetch` — Yahoo Finance's public chart endpoint for SYMBOL.NS
+   (verified 2026-11-01: NSE, INR, IST, split-adjusted, dividends not
+   adjusted). Free, UNOFFICIAL, personal research only; may lag or have
+   gaps. Say this whenever its data is used. Re-run after 18:00 IST.
+2. Groww connector (read-only chart tools) once its tools are listed.
+3. `data-import` for files the user downloaded from nseindia.com by hand.
+   NSE's site returns 403 to scripts; never try to get around that.
 
 ## Rules
 

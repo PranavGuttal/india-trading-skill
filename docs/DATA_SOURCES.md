@@ -1,11 +1,13 @@
 # Data sources
 
-**Verified and implemented in this release: one — local CSV files.**
-Nothing else has been verified. The build environment could not reach NSE or
-other market-data sites, so no public source was tested.
+**Verified and implemented: local CSV files, and Yahoo Finance's public chart
+endpoint for NSE symbols (`data-fetch`, checked 2026-11-01).** NSE's own site
+blocks scripted access and is used only through files you download by hand.
 
 | Source | Status | Fields | Latency | Coverage | Symbol / TZ | Terms & limits | Suitable for |
 |---|---|---|---|---|---|---|---|
+| Yahoo Finance chart API (`data-fetch`) | **Implemented, tested; verified live 2026-11-01** — unofficial | date, OHLC (split-adjusted), volume | end of day (re-run after 18:00 IST) | ~5y+ daily for NSE listings (SYMBOL.NS) | NSE symbol + `.NS`; IST | free, personal use, may change or rate-limit | research, backtest, replay, paper |
+| NSE website / archives | **Blocked to scripts** (HTTP 403 / no connection from this machine, 2026-11-01) | — | — | — | — | NSE terms; not bypassed | manual download + `data-import` only |
 | Local CSV (`data/<SYMBOL>.csv`) | **Implemented, tested** | date, open, high, low, close, volume, optional source | whatever you load (end of day) | whatever you load | NSE symbol; dates are IST trading days | yours | research, backtest, paper replay |
 | Synthetic CSV (`scripts/make_sample_data.py`) | **Implemented** — NOT real prices, `source=SYNTHETIC` | as above | n/a | 750 bars from 2023-01-02 | fake symbols `SYNTH_*` | none | tests and demos only |
 | Groww MCP connector (in Claude chat) | **Unverified** — tool list not inspected | holdings, positions, P&L, chart data per Groww's 4 Aug 2025 post | unknown | unknown | unknown | Groww terms; OAuth, ~1-day session | possibly research and quotes for paper; quote timestamps must be checked |

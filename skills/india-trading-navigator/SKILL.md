@@ -22,15 +22,17 @@ description: >-
 | Load real data, holidays | india-data-manager | `data-import`, `scan` |
 | Journal / export | india-trade-journal | `journal` |
 | How am I doing, go live? | india-trade-review | `review` |
+| Real-money order (locked) | india-live-trading | `live status/prepare/approve/record` |
 
 All commands: `python -m india_trading.cli <command>` from the project root,
 after `pip install -e ".[dev]"`.
 
 ## Always true
 
-- PAPER ONLY. No command can place a real order. Real orders, if the user
-  chooses, are placed by them in the Groww app.
-- The Groww connector is used read-only; list its tools before using any.
+- Paper by default. Real money only through india-live-trading, which stays
+  locked until graduation and needs the user's explicit yes per order.
+- The Groww connector is read-only everywhere except the guarded order call
+  in india-live-trading; list its tools before using any.
 - The risk manager's block is final; never suggest loosening limits.
 - `data/sample/` is SYNTHETIC; <30 trades is inconclusive; not advice.
 - Suggested first session: `status` → `costs 200` → `scan` →

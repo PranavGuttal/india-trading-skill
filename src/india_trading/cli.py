@@ -18,11 +18,16 @@ from .backtesting.engine import format_report, run_backtest
 from .brokers.paper_broker import PaperBroker
 from .config import ConfigError, Settings, load_settings
 from .journal.review import format_review, review
+from .live.desk import LiveDesk, graduation_for
+from .live.graduation import format_graduation
+from .live.guard import load_tools
+from .live.ledger import LedgerError
 from .journal.store import Journal
 from .logging_setup import setup_logging
 from .market_data.calendar import IST, NSECalendar
 from .market_data.csv_source import DataError, load_csv
 from .market_data.importer import import_csv
+from .market_data.yahoo_source import SOURCE as YAHOO_SOURCE, fetch_to_csv
 from .models import OrderIntent, Quote, Side
 from .monitoring.monitor import Monitor
 from .risk.costs import estimate_charges
@@ -438,6 +443,85 @@ def cmd_data_import(args):
     return 0
 
 
+def cmd_live(args):
+    s, cal, journal = _ctx(args)
+    desk = LiveDesk(s, journal, cal, args.data_dir or s.data_dir)
+    print("[LIVE DESK — real-money path; nothing is sent from here. Orders go through the Groww connector, "
+          "checked by the guard hook.]")
+    if args.lcmd == "status":
+        tools = load_tools()
+        print(json.dumps({"live_switches_on": s.live_requested, "trading_mode": s.trading_mode,
+                          "live_trading_enabled": s.live_trading_enabled,
+                          "kill_switch": KillSwitch(s.state_path("KILL_SWITCH")).engaged,
+                          "budget_inr": s.max_experimental_allocation_inr,
+                          "groww_read_only_tools": sorted(tools["read_only"]),
+                          "groww_order_tools": sorted(tools["order_tools"]),
+                          "ledger_positions": desk.ledger.positions()}, indent=2, default=str))
+        print(format_graduation(graduation_for(s, journal)))
+        return 0
+    if args.lcmd == "tickets":
+        for t in desk.ledger.tickets(args.limit):
+            print(f"{t['created_at'][:19]} {t['status']:16} {t['kind']:5} {t['side']} {t['qty']} {t['symbol']} "
+                  f"@ ₹{t['limit_price']}  {t['intent_id']}  {t['broker_order_id'] or ''}")
+        return 0
+    if args.lcmd in ("prepare", "exit"):
+        if args.lcmd == "prepare":
+            r = desk.prepare_entry(args.symbol, args.price, args.price_source, args.cash)
+        else:
+            r = desk.prepare_exit(args.symbol, args.price, args.price_source, args.reason)
+        print(r.message)
+        if r.text:
+            print(r.text)
+        for why in r.reasons:
+            print("  -", why)
+        if r.ok:
+            print("NEXT: show this ticket to the user. Only if they reply an explicit yes for THIS order run "
+                  f"`live approve {r.ticket['intent_id']}`; the approval expires in {s.live_approval_ttl_seconds}s.")
+        return 0 if r.ok else 1
+    try:
+        if args.lcmd == "approve":
+            reply = args.reply
+            if reply is None:
+                try:
+                    reply = input("Type 'yes' to approve this REAL-MONEY order (anything else declines): ").strip()
+                except EOFError:
+                    reply = ""
+            t = desk.ledger.approve(args.intent_id, reply, datetime.now(IST))
+            journal.record("APPROVED", "live", f"reply: {reply[:60]}", symbol=t["symbol"], intent_id=t["intent_id"])
+            print(f"APPROVED {t['side']} {t['qty']} {t['symbol']} @ ₹{t['limit_price']} until "
+                  f"+{s.live_approval_ttl_seconds}s. Send exactly this order through the Groww order tool.")
+            return 0
+        if args.lcmd == "record":
+            t = desk.ledger.record(args.intent_id, args.status.upper(), args.order_id, args.filled_qty, args.avg_price,
+                                   args.note or "")
+            journal.record("FILL" if t["filled_qty"] else "ORDER_STATUS", "live",
+                           f"{t['status']} {t['side']} {t['filled_qty']}/{t['qty']} {t['symbol']} @ {t['avg_price']} "
+                           f"(Groww order {t['broker_order_id']})", symbol=t["symbol"], intent_id=t["intent_id"])
+            print(f"recorded {t['status']} for {t['intent_id']}")
+            return 0
+    except LedgerError as e:
+        print("REFUSED:", e)
+        return 2
+    return 2
+
+
+def cmd_data_fetch(args):
+    s, cal, _ = _ctx(args)
+    symbols = [x.strip().upper() for x in (args.symbols or []) if x.strip()] or list(s.watchlist)
+    if any(sym.startswith("SYNTH_") for sym in symbols):
+        print("SYNTH_* are synthetic sample symbols, not NSE listings. Give real NSE symbols, e.g. INFY TCS.")
+        return 2
+    print(f"Downloading {len(symbols)} NSE symbol(s) from {YAHOO_SOURCE}, {args.years}y daily, into {args.out} ...")
+    bad = 0
+    for sym, status, msgs in fetch_to_csv(symbols, args.out, args.years, cal):
+        bad += status != "OK"
+        print(f"  {sym:12} {status:7} {msgs[0] if msgs else ''}")
+        for m in msgs[1:]:
+            print(f"  {'':12} warning: {m}")
+    print("Unofficial free data for personal research; re-run after 18:00 IST for the latest close.")
+    return 1 if bad else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="india_trading", description="NSE research + paper-trading toolkit (no live orders).")
     ap.add_argument("--config", default="config/settings.yaml", help="YAML settings (optional)")
@@ -510,10 +594,41 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", required=True, help="where the file came from, e.g. nse-historical, groww-mcp")
     p.add_argument("--out", default="data/real"); p.add_argument("--series", default="EQ")
     p.set_defaults(fn=cmd_data_import)
+    p = sub.add_parser("data-fetch", help="download real NSE daily candles (Yahoo Finance, unofficial) into data/real/")
+    p.add_argument("symbols", nargs="*", help="NSE symbols, e.g. INFY TCS RELIANCE (default: watchlist)")
+    p.add_argument("--years", type=int, default=5); p.add_argument("--out", default="data/real")
+    p.set_defaults(fn=cmd_data_fetch)
+    live = sub.add_parser("live", help="REAL-MONEY desk (locked until graduation + live switches); never sends orders itself")
+    lsub = live.add_subparsers(dest="lcmd", required=True)
+    q = lsub.add_parser("status", help="switches, graduation test, classified Groww tools, live positions")
+    q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
+    q = lsub.add_parser("tickets", help="live tickets and their states"); q.add_argument("--limit", type=int, default=30)
+    q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
+    q = lsub.add_parser("prepare", help="analyse + risk-check + write a live BUY ticket (needs graduation)")
+    q.add_argument("symbol"); q.add_argument("--price", type=float, required=True)
+    q.add_argument("--price-source", required=True, help="e.g. groww-mcp (read just now)")
+    q.add_argument("--cash", type=float, help="available cash read from Groww just now (required to pass)")
+    q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
+    q = lsub.add_parser("exit", help="write a live SELL ticket for a live-ledger position")
+    q.add_argument("symbol"); q.add_argument("--price", type=float, required=True)
+    q.add_argument("--price-source", required=True); q.add_argument("--reason", default="manual")
+    q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
+    q = lsub.add_parser("approve", help="explicit per-order yes for one PREPARED ticket")
+    q.add_argument("intent_id"); q.add_argument("--reply", help="only the user's own words for THIS ticket")
+    q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
+    q = lsub.add_parser("record", help="record the Groww result of a SENT ticket")
+    q.add_argument("intent_id"); q.add_argument("--status", required=True,
+                                                choices=["FILLED", "PARTIALLY_FILLED", "REJECTED", "CANCELLED", "UNKNOWN"])
+    q.add_argument("--order-id"); q.add_argument("--filled-qty", type=int, default=0)
+    q.add_argument("--avg-price", type=float); q.add_argument("--note"); q.add_argument("--data-dir")
+    q.set_defaults(fn=cmd_live)
     return ap
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):   # Windows pipes default to cp1252, which cannot print ₹
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args) or 0

@@ -132,7 +132,9 @@ class Supervisor:
         st.decision = dec
         self.journal.record("RISK_APPROVED" if dec.approved else "RISK_BLOCKED", self.mode,
                             "; ".join(dec.reasons) or "all checks passed", symbol=symbol,
-                            intent_id=dec.intent.intent_id if dec.intent else None, payload=dec.model_dump(mode="json"))
+                            data_source=st.proposal.data_source,
+                            intent_id=dec.intent.intent_id if dec.intent else None,
+                            payload={**dec.model_dump(mode="json"), "quote_source": quote.source if quote else None})
         st.step = Step.TICKET
         st.ticket = render_ticket(st.proposal, dec, self.mode)
         if not dec.approved:

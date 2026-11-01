@@ -5,7 +5,7 @@
     {
       "name": "india-trading-skill",
       "source": "./",
-      "description": "NSE research, risk control and PAPER trading with Groww charges. No live order path."
+      "description": "NSE research, risk control and PAPER trading with Groww charges; real-money desk locked behind graduation and a guard hook."
     }
   ]
 }

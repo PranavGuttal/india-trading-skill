@@ -1,16 +1,18 @@
 # India Trading Skill
 
 A research, risk-control and **paper-trading** toolkit for NSE cash equities,
-with 12 Claude skills and 2 read-only review agents on top. It analyses stocks
+with 13 Claude skills and 2 read-only review agents on top. It analyses stocks
 with deterministic Python, refuses trades its risk manager does not like,
 simulates orders (by hand or on autopilot), replays history day by day, and
-keeps a journal. **It cannot place real orders.** Real orders, if you choose to
-make them, are placed by you in the Groww app from a printed ticket.
+keeps a journal. **Real-money orders are locked** until the paper account
+graduates (≥30 real-data paper trades on ≥20 days, profitable after charges);
+even then each order needs your explicit yes and passes a guard hook in
+Claude Code. See `docs/GROWW_INTEGRATION.md`.
 
 > This is an engineering and learning project, not advice and not a way to
 > make ₹100 a day. Most retail intraday traders in India lose money (SEBI).
 
-## What works (tested: 107 automated tests pass)
+## What works (tested: 117 automated tests pass)
 - Load + validate daily OHLCV CSVs (duplicates, NaNs, OHLC consistency, stale data, split-like jumps); **importer** for NSE/Groww candle exports
 - Indicators: SMA, EMA, RSI, MACD, ATR, relative volume, VWAP, support/resistance — tested, causal
 - Strategy `ma_trend_pullback` v1.0.0 with explicit rules; returns TRADE or NO_TRADE with reasons
@@ -24,12 +26,13 @@ make them, are placed by you in the Groww app from a printed ticket.
 - **Performance review** of paper trades + journal integrity, with the 30-trade rule
 - Backtester: next-bar fills, same risk manager, charges, slippage, train/test split, baseline, honest verdicts
 - Read-only monitor with heartbeat, stop file and kill switch
-- CLI, 12 skills, 2 agents, Claude Code plugin manifest
+- **Locked live desk** via the Groww MCP connector: graduation test, live ledger, 5-minute per-order approval, PreToolUse guard hook that denies any non-matching Groww order call
+- CLI, 13 skills, 2 agents, Claude Code plugin manifest
 
 ## Not done / not verified
-- **No live order path.** `GrowwAdapter` raises `UnsupportedOperation` for everything.
+- Live path is **locked** and was never run against the real Groww connector; `config/groww_tools.yaml` is empty until its tools are listed. The Python `GrowwAdapter` still refuses everything.
 - Groww MCP tool names/schemas were not inspected (connector not attached during the build).
-- No verified real-time or free NSE data source; sample data is **synthetic**.
+- Real NSE daily data via `data-fetch` (Yahoo Finance, **unofficial**, end of day); no real-time feed except prices Claude reads from Groww. `data/sample/` is **synthetic**.
 - NSE holiday list is empty until you fill it from the official circular.
 - Breadth is of your watchlist only; no verified Nifty breadth / India VIX source.
 - Instrument eligibility (series, ASM/GSM, price bands) is not checked.
@@ -105,19 +108,22 @@ charges, verdict NO EDGE SHOWN. At ₹200: 291 signals, all blocked, 0 trades.
 | india-data-manager | import real data, holidays, validation |
 | india-trade-journal | journal and export |
 | india-trade-review | performance review, "should I go live?" checklist |
+| india-live-trading | locked real-money desk: status, prepare, approve, record |
 
 Agents (read-only): `india-strategy-critic` (second opinion on any result),
 `india-risk-auditor` (settings, journal and guard audit).
 
 ## Layout
 ```
+.claude/           settings.json (live guard hook)
 .claude-plugin/    plugin.json, marketplace.json
 agents/            2 read-only review agents
-config/            settings.example.yaml, nse_holidays.yaml
-skills/            12 Claude skills (SKILL.md)
+config/            settings.example.yaml, nse_holidays.yaml, groww_tools.yaml
+skills/            13 Claude skills (SKILL.md)
 src/india_trading/ market_data, indicators, strategies, risk, brokers, execution,
                    backtesting, simulation (timemachine, replay), analysis (breadth),
-                   monitoring, journal (store, review), workflows (supervisor, autopilot), cli.py
+                   monitoring, journal (store, review), workflows (supervisor, autopilot),
+                   live (graduation, ledger, desk, guard), cli.py
 tests/             unit / integration / safety
 docs/              REFERENCE_ANALYSIS, ARCHITECTURE, DATA_SOURCES, RISK_POLICY,
                    GROWW_INTEGRATION, BACKTESTING, OPERATIONS

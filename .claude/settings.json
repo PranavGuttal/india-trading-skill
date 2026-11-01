@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*[Gg][Rr][Oo][Ww][Ww].*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.venv/Scripts/python.exe\" -m india_trading.live.guard",
+            "shell": "bash",
+            "timeout": 20,
+            "onFailure": "block",
+            "statusMessage": "Live guard: checking Groww tool call"
+          }
+        ]
+      }
+    ]
+  }
+}

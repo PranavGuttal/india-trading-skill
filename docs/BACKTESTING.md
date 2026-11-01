@@ -41,6 +41,25 @@ this plan hit target vs stop", not "will it work".
 Not modelled yet: partial fills, circuit limits/price bands, corporate
 actions (use adjusted data), liquidity limits, holidays without a verified list.
 
+## First REAL-data result (2026-11-01)
+Data: `data-fetch` (Yahoo Finance, unofficial), 20 large NSE stocks
+(RELIANCE, TCS, INFY, HDFCBANK, ICICIBANK, SBIN, ITC, LT, BHARTIARTL,
+HINDUNILVR, AXISBANK, KOTAKBANK, MARUTI, SUNPHARMA, TITAN, BAJFINANCE,
+ASIANPAINT, HCLTECH, WIPRO, NTPC), 1,236 daily bars each, 2021-11-01 → 2026-10-30.
+`ma_trend_pullback` v1.0.0, study budget ₹20,000 per stock, ₹200 risk/trade:
+
+| | Value |
+|---|---|
+| Trades / wins | 760 / 243 (32%) |
+| Net after charges | **₹-37,002** (charges ₹33,485; gross ≈ ₹-3,517) |
+| Train period / test period (last 30%) | ₹-25,064 / ₹-11,939 (209 trades) |
+| Stocks with positive net | **0 of 20** |
+| Buy & hold, same capital, summed | ₹+1,63,782 |
+
+Verdict: **NO EDGE.** Before charges the strategy is roughly break-even;
+Groww charges turn that into a steady loss, in both periods, on every stock.
+It must not be used with real money. Graduation will not pass with it.
+
 ## Example output — SYNTHETIC data (not real prices)
 
 Default ₹200 budget:

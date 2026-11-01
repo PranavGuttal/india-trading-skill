@@ -62,6 +62,14 @@ They do **not** guarantee a loss can't exceed plan. Gaps through a stop,
 slippage, partial fills, broker outages, charge changes, and manual actions
 outside this app can all produce worse outcomes.
 
+## Live (real money)
+Locked by default. Unlock requires all live switches, graduation (≥30 closed
+forward-paper trades on ≥20 distinct days, positive after charges, real data
+and live-read prices only; floors cannot be lowered in settings), the
+RiskManager with cash read from Groww, an explicit per-order yes (5-minute
+expiry), and the guard hook match. The live budget is the same
+`max_experimental_allocation_inr` (₹200 by default). See GROWW_INTEGRATION.md.
+
 ## Kill switch
 `python -m india_trading.cli kill-switch on` creates `state/KILL_SWITCH`.
 While it exists, every new order is blocked and the monitor stops. It

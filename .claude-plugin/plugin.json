@@ -1,7 +1,7 @@
 {
   "name": "india-trading-skill",
   "version": "0.2.0",
-  "description": "NSE cash-equity research, risk control and PAPER trading with Groww charges: 12 skills and 2 read-only review agents. No live order path.",
+  "description": "NSE cash-equity research, risk control and PAPER trading with Groww charges: 13 skills, 2 read-only review agents, and a real-money desk locked behind graduation and a guard hook.",
   "author": { "name": "Pranav Guttal" },
   "license": "MIT",
   "keywords": ["nse", "india", "groww", "paper-trading", "risk", "backtest"]

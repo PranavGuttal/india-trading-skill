@@ -78,6 +78,11 @@ class Settings(BaseModel):
     # Skip NEW entries when the watchlist's own breadth says RISK_OFF (exits still run).
     regime_gate: bool = False
 
+    # Live graduation: minimums can only be raised, never lowered below these floors.
+    graduation_min_trades: int = Field(30, ge=30)
+    graduation_min_days: int = Field(20, ge=20)
+    live_approval_ttl_seconds: int = Field(300, ge=30, le=300)   # an approval expires after this
+
     data_dir: str = "data"
     state_dir: str = "state"
     watchlist: list[str] = Field(default_factory=lambda: ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ITC"])

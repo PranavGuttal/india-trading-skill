@@ -1,0 +1,25 @@
+# Classification of Groww MCP tools for the live guard hook (src/india_trading/live/guard.py).
+#
+# DELIBERATELY EMPTY. The Groww connector's real tool names and schemas have not
+# been inspected yet. Until a tool is listed here, the hook DENIES every call to it.
+#
+# How to fill it (in Claude Code, with the Groww connector enabled):
+#   1. Ask Claude to list the Groww tools and show each tool's input schema.
+#   2. Put tools that only READ (holdings, positions, funds, quotes, charts,
+#      order status) under read_only, using the exact tool name Claude Code shows
+#      (e.g. mcp__<server>__<tool>).
+#   3. Put the tool that PLACES an order under order_tools, mapping its input
+#      field names. Never list modify/cancel tools as read_only.
+#   4. Run: python -m india_trading.cli live status   (shows what is classified)
+#
+# read_only:
+#   - mcp__groww__get_holdings            # example shape only, NOT verified
+# order_tools:
+#   mcp__groww__place_order:              # example shape only, NOT verified
+#     symbol: trading_symbol              # input field holding the NSE symbol
+#     side: transaction_type              # input field holding buy/sell
+#     qty: quantity
+#     price: price                        # limit price; orders without one are denied
+#     side_values: {BUY: BUY, SELL: SELL} # how this tool spells buy/sell
+read_only: []
+order_tools: {}
