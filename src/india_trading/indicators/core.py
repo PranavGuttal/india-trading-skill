@@ -95,10 +95,31 @@ def support_resistance(df: pd.DataFrame, n: int = 20) -> pd.DataFrame:
     })
 
 
+def prior_high(s: pd.Series, n: int) -> pd.Series:
+    """Highest value of the PREVIOUS n bars (excludes the current bar)."""
+    return s.shift(1).rolling(n, min_periods=n).max()
+
+
+def prior_low(s: pd.Series, n: int) -> pd.Series:
+    """Lowest value of the PREVIOUS n bars (excludes the current bar)."""
+    return s.shift(1).rolling(n, min_periods=n).min()
+
+
+def returns(close: pd.Series, n: int) -> pd.Series:
+    return close / close.shift(n) - 1
+
+
+def volatility(close: pd.Series, n: int = 252) -> pd.Series:
+    """Annualised stdev of daily returns over n bars."""
+    return close.pct_change().rolling(n, min_periods=n).std() * np.sqrt(252)
+
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    out["sma20"] = sma(out["close"], 20)
-    out["sma50"] = sma(out["close"], 50)
+    for n in (5, 10, 20, 50, 150, 200):
+        out[f"sma{n}"] = sma(out["close"], n)
+    out["sma200_21ago"] = out["sma200"].shift(21)
+    out["rsi2"] = rsi(out["close"], 2)
     out["rsi14"] = rsi(out["close"], 14)
     out["atr14"] = atr(out, 14)
     out["relvol20"] = relative_volume(out["volume"], 20)
@@ -106,4 +127,11 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["support20"], out["resistance20"] = sr["support"], sr["resistance"]
     m = macd(out["close"])
     out["macd"], out["macd_signal"], out["macd_hist"] = m["macd"], m["signal"], m["hist"]
+    for n in (20, 55, 252):
+        out[f"hh{n}"] = prior_high(out["high"], n)
+    for n in (10, 20, 252):
+        out[f"ll{n}"] = prior_low(out["low"], n)
+    for n in (21, 63, 126, 252):
+        out[f"ret{n}"] = returns(out["close"], n)
+    out["vol252"] = volatility(out["close"], 252)
     return out

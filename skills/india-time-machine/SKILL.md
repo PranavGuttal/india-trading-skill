@@ -12,9 +12,9 @@ description: >-
 # india-time-machine
 
 ```bash
-python -m india_trading.cli timemachine SYMBOL                               # uses the strategy's plan (if TRADE)
-python -m india_trading.cli timemachine SYMBOL --entry 412 --stop 398 --target 440
-python -m india_trading.cli timemachine SYMBOL --qty 1 --hold 10 --paths 10000 --as-of 2025-09-22
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" timemachine SYMBOL                               # uses the strategy's plan (if TRADE)
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" timemachine SYMBOL --entry 412 --stop 398 --target 440
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" timemachine SYMBOL --qty 1 --hold 10 --paths 10000 --as-of 2025-09-22
 ```
 
 ## How it works (say this in plain words)

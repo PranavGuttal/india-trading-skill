@@ -4,7 +4,7 @@
             ┌─────────────── Claude skills (skills/india-*) ───────────────┐
             │  instructions + CLI entry points; Groww connector READ-ONLY   │
             └───────────────────────────────┬──────────────────────────────┘
-                                            │ python -m india_trading.cli …
+                                            │ python scripts/india.py …   
 ┌───────────────────────────────────────────▼───────────────────────────────┐
 │ Supervisor (workflows/supervisor.py)  — state machine, halts on failure     │
 │ LOAD → VALIDATE → ANALYZE → RISK → TICKET → APPROVAL → EXECUTE → DONE       │
@@ -24,6 +24,16 @@ Replay (simulation/replay.py): AutoPilot once per past day, separate state dir.
 Time machine (simulation/timemachine.py): Monte-Carlo odds of one plan.
 Breadth (analysis/breadth.py) and Review (journal/review.py): pure reporting.
 Backtester (backtesting/engine.py): same strategy + same RiskManager, next-bar fills.
+Strategies (strategies/): declarative Strategy = named entry conditions + levels +
+  ExitPolicy (take profit, ATR trail, close rules, max hold); one definition used by
+  scan, analyze, backtest, lab, replay, autopilot and the live desk.
+Portfolio lab (backtesting/portfolio.py, lab.py): many stocks, one cash account,
+  max positions, benchmarks (Nifty, buy & hold, NIFTYBEES), earlier/later halves.
+Analysis (analysis/): regime (Nifty, VIX, distribution/FTD), sectors, screener,
+  technical, planner (size/plan/exit-plan), portfolio review, alerts, actions.
+Allocation pilot (workflows/allocation.py): monthly ETF/basket/rotation, own paper account.
+Launcher (scripts/india.py): finds a Python with the packages (per-user venv outside
+  the plugin), runs the CLI in the user's project folder; `--guard` for the hook.
 ```
 
 ## Component responsibilities (spec §13)

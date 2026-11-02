@@ -28,8 +28,15 @@ Check, in order, and quote the numbers you rely on:
    holiday list.
 7. Baseline: did it beat buy-and-hold after charges?
 
-You may run read-only commands from the project root, e.g.
-`python -m india_trading.cli backtest SYMBOL --capital 20000 --risk 200`,
+8. Multiple testing: how many strategies/parameters were tried before this
+   one? Does the `holdout_25` universe agree
+   (`lab --universe holdout_25 --data-dir data/real`)? Was any parameter
+   chosen after seeing the test period?
+9. Portfolio vs single stock: does the result survive the portfolio lab
+   (shared cash, max positions) against equal-weight buy & hold?
+
+You may run read-only commands in the user's project folder, e.g.
+`python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" backtest SYMBOL --capital 20000 --risk 200`,
 `replay`, `review`, `journal --limit 50`. Never run `kill-switch`,
 `paper start`, `paper close`, `autopilot`, `data-import`, and never edit files.
 

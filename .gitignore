@@ -11,3 +11,10 @@ __pycache__/
 .venv/
 venv/
 reports/private/
+data/indices/
+data/etf/
+reports/daily/
+config/alerts.yaml
+holdings*.csv
+holdings*.json
+data/universes/

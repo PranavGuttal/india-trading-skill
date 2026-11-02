@@ -22,7 +22,9 @@ from ..market_data.calendar import IST, NSECalendar
 from ..market_data.csv_source import DataError, is_stale, load_csv
 from ..models import Quote, RiskDecision, TradeProposal
 from ..risk.manager import RiskManager
-from ..strategies import ma_trend
+from ..analysis.market_gate import market_ok
+from ..paths import config_file
+from ..strategies import get as get_strategy
 
 
 class Step(str, Enum):
@@ -56,12 +58,12 @@ class RunState:
 
 class Supervisor:
     def __init__(self, settings: Settings, broker: BrokerAdapter, journal: Journal,
-                 calendar: Optional[NSECalendar] = None, strategy: Callable = ma_trend.evaluate):
+                 calendar: Optional[NSECalendar] = None, strategy: Optional[Callable] = None):
         self.s = settings
         self.broker = broker
         self.journal = journal
-        self.calendar = calendar or NSECalendar.from_yaml(Path("config") / "nse_holidays.yaml")
-        self.strategy = strategy
+        self.calendar = calendar or NSECalendar.from_yaml(config_file("nse_holidays.yaml"))
+        self.strategy = strategy or get_strategy(settings.strategy).evaluate
         self.risk = RiskManager(settings)
         self.exec = ExecutionAgent(settings, broker, journal)
         # symbol -> (df, validation report, source, indicators) loaded once by a replay.
@@ -127,8 +129,10 @@ class Supervisor:
             account = None
             st.log.append(f"account state unavailable: {e}")
         session = self.calendar.status(now)
+        market = market_ok(self.s.indices_dir, as_of or today, self.s.max_bar_age_days) \
+            if self.s.regime_gate == "index" else None
         dec = self.risk.evaluate(st.proposal, quote, account, now=now, trade_date=str(today),
-                                 session_open=session.is_open)
+                                 session_open=session.is_open, market=market)
         st.decision = dec
         self.journal.record("RISK_APPROVED" if dec.approved else "RISK_BLOCKED", self.mode,
                             "; ".join(dec.reasons) or "all checks passed", symbol=symbol,

@@ -21,7 +21,9 @@ from pathlib import Path
 
 import yaml
 
-TOOLS_FILE = Path("config") / "groww_tools.yaml"
+from ..paths import config_file
+
+TOOLS_FILE = Path("config") / "groww_tools.yaml"   # project copy; falls back to the plugin's (see paths.py)
 
 
 def _out(decision: str | None, reason: str = "") -> dict:
@@ -31,7 +33,8 @@ def _out(decision: str | None, reason: str = "") -> dict:
                                    "permissionDecisionReason": reason}}
 
 
-def load_tools(path: Path = TOOLS_FILE) -> dict:
+def load_tools(path: Path | None = None) -> dict:
+    path = Path(path) if path is not None else config_file("groww_tools.yaml")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
     raw = raw or {}
     return {"read_only": set(raw.get("read_only") or []), "order_tools": dict(raw.get("order_tools") or {})}

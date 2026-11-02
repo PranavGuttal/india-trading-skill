@@ -1,141 +1,151 @@
 # India Trading Skill
 
-A research, risk-control and **paper-trading** toolkit for NSE cash equities,
-with 13 Claude skills and 2 read-only review agents on top. It analyses stocks
-with deterministic Python, refuses trades its risk manager does not like,
-simulates orders (by hand or on autopilot), replays history day by day, and
-keeps a journal. **Real-money orders are locked** until the paper account
-graduates (≥30 real-data paper trades on ≥20 days, profitable after charges);
-even then each order needs your explicit yes and passes a guard hook in
-Claude Code. See `docs/GROWW_INTEGRATION.md`.
+A Claude Code plugin for **NSE cash equities through Groww**. It has 27 skills
+and 6 read-only agents, all on top of a tested Python toolkit:
+- **Research:** market regime, sector rotation, a Nifty 500 screener, technical
+  and fundamental stock analysis, a portfolio-level strategy lab, a trade planner,
+  and agents for news and SEBI circulars, results, FII/DII flows and scenarios.
+- **Risk control:** one deterministic risk manager with a capital floor and a
+  tested market gate.
+- **Trading:** paper trading (by hand, on autopilot, or monthly allocation),
+  plus a real-money desk that stays **locked** until the paper account passes
+  a graduation test. Every live order needs your explicit yes and passes a
+  guard hook inside Claude Code.
 
-> This is an engineering and learning project, not advice and not a way to
-> make ₹100 a day. Most retail intraday traders in India lose money (SEBI).
+> **Read this first.** On 10 years of real NSE data, **no strategy in this
+> toolkit beat simply buying and holding after Groww's charges**. The
+> 200-day trend filter only reduced drawdowns, and it cost return
+> (docs/STRATEGY_LAB.md). This is an engineering and learning tool, not a
+> money machine and not advice. Most retail traders in India lose money (SEBI).
 
-## What works (tested: 117 automated tests pass)
-- Load + validate daily OHLCV CSVs (duplicates, NaNs, OHLC consistency, stale data, split-like jumps); **importer** for NSE/Groww candle exports
-- Indicators: SMA, EMA, RSI, MACD, ATR, relative volume, VWAP, support/resistance — tested, causal
-- Strategy `ma_trend_pullback` v1.0.0 with explicit rules; returns TRADE or NO_TRADE with reasons
-- Groww charge model (from groww.in/pricing, 2026-10-30) and a `costs` calculator with break-even
-- Deterministic risk manager (budget, order cap, risk incl. charges, daily/**weekly/monthly** loss limits, **losing-streak cooldown**, positions, duplicates, stale quotes, kill switch) — fails closed
-- Paper broker on SQLite: idempotent orders, fills/partials/rejections, cash & positions, restart recovery, timeout reconciliation
-- **Paper autopilot**: unattended ticks that manage exits (stop, target, close < SMA50, max hold) then auto-approve paper entries through the same risk manager; refuses any live adapter
-- **Day-by-day replay** of the autopilot over history, in its own state folder
-- **Time machine**: 10,000-path Monte-Carlo odds of one plan (target vs stop vs gap vs time) after charges
-- **Watchlist breadth / regime** (RISK_ON/NEUTRAL/RISK_OFF), optional entry gate
-- **Performance review** of paper trades + journal integrity, with the 30-trade rule
-- Backtester: next-bar fills, same risk manager, charges, slippage, train/test split, baseline, honest verdicts
-- Read-only monitor with heartbeat, stop file and kill switch
-- **Locked live desk** via the Groww MCP connector: graduation test, live ledger, 5-minute per-order approval, PreToolUse guard hook that denies any non-matching Groww order call
-- CLI, 13 skills, 2 agents, Claude Code plugin manifest
-
-## Not done / not verified
-- Live path is **locked** and was never run against the real Groww connector; `config/groww_tools.yaml` is empty until its tools are listed. The Python `GrowwAdapter` still refuses everything.
-- Groww MCP tool names/schemas were not inspected (connector not attached during the build).
-- Real NSE daily data via `data-fetch` (Yahoo Finance, **unofficial**, end of day); no real-time feed except prices Claude reads from Groww. `data/sample/` is **synthetic**.
-- NSE holiday list is empty until you fill it from the official circular.
-- Breadth is of your watchlist only; no verified Nifty breadth / India VIX source.
-- Instrument eligibility (series, ASM/GSM, price bands) is not checked.
-- Not modelled: partial fills in backtests, circuit limits, corporate actions.
-
-## The ₹200 reality
-At Groww's published charges a ₹200 delivery round trip costs ≈ ₹36 (≈18%)
-(`python -m india_trading.cli costs 200`). The per-trade risk limit includes
-charges, so **every ₹200 trade is blocked** — in paper, in the backtest and in
-the replay. That is the risk manager doing its job. Use a larger *paper*
-budget (`--capital`) only to study the strategy. See `docs/RISK_POLICY.md`.
-
-## Setup (Windows, PowerShell)
-```powershell
-cd $HOME\Documents\india-trading-skill
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-copy config\settings.example.yaml config\settings.yaml
-python -m pytest                 # run all tests
+## Install in Claude Code
+```text
+/plugin marketplace add C:\Users\<you>\Documents\india-trading-skill
+/plugin install india-trading-skill@india-trading
 ```
-(macOS/Linux: `source .venv/bin/activate`, `cp` instead of `copy`.)
-`.venv` holds the Python packages the skills' commands need; it is git-ignored.
-Run every command from the project root.
+Then restart Claude Code so the guard hook loads. In any project folder, ask
+Claude: **"set up the India trading toolkit"**. It runs:
+- `--setup` once: about 6 minutes, and it downloads pandas, numpy, pydantic,
+  PyYAML and tzdata into `%LOCALAPPDATA%\india-trading\venv`, outside the plugin;
+- then `doctor`, which lists anything still missing.
 
-## Try it
+From a terminal, the same commands are:
 ```powershell
-python -m india_trading.cli status
-python -m india_trading.cli costs 200
-python -m india_trading.cli scan
-python -m india_trading.cli breadth
-python -m india_trading.cli analyze SYNTH_CHOP --as-of 2025-09-22
-python -m india_trading.cli timemachine SYNTH_TREND --entry 150 --stop 143 --target 164 --qty 10
-python -m india_trading.cli backtest SYNTH_TREND --capital 20000 --risk 200
-python -m india_trading.cli replay --capital 20000 --risk 200     # autopilot day by day (paper)
-python -m india_trading.cli autopilot                             # one paper tick at the last close
-python -m india_trading.cli paper start SYNTH_CHOP --as-of 2025-09-22      # blocked at ₹200
-python -m india_trading.cli review
-python -m india_trading.cli journal
-python -m india_trading.cli kill-switch on
+python "<plugin folder>\scripts\india.py" --setup
+python "<plugin folder>\scripts\india.py" doctor
 ```
+Your data, settings and state live in the **project folder** you work in. The
+plugin folder only holds code and reference files.
 
-Example on the SYNTHETIC sample (not real prices): `replay --capital 20000
---risk 200` → 750 days, 54 paper trades, net ₹-2,370.95 after ₹2,276.44
-charges, verdict NO EDGE SHOWN. At ₹200: 291 signals, all blocked, 0 trades.
-
-## Using it from Claude with Groww
-1. Install the skills and agents, either:
-   - as a plugin in Claude Code: `/plugin marketplace add <path to this folder>`
-     then `/plugin install india-trading-skill@india-trading`, or
-   - by copying `skills/*` into `%USERPROFILE%\.claude\skills\` and
-     `agents/*` into `%USERPROFILE%\.claude\agents\`.
-   The skills run this project's CLI, so open Claude Code **in this folder**
-   with the venv set up.
-2. Optionally enable the Groww connector (`https://mcp.groww.in/mcp`).
-   The skills tell Claude to list its tools first and use **read-only** ones.
-3. Ask: "what can you do", "scan my watchlist", "analyse INFY", "what are the
-   odds of this plan", "run the paper autopilot every 15 minutes during market
-   hours", "replay last year", "how am I doing".
-
-## Skills and agents
-| Skill | Does |
+## What to ask Claude
+| Ask | Skill → command |
 |---|---|
-| india-trading-navigator | maps a request to the right skill/command |
-| india-market-monitor | session status, watchlist scan, read-only Groww holdings/positions |
-| india-market-breadth | watchlist breadth and regime |
-| india-trade-research | analyse one stock; backtest |
-| india-time-machine | Monte-Carlo odds of one plan |
-| india-cost-calculator | Groww charges, break-even, loss at stop |
-| india-risk-manager | limits, why blocked, kill switch |
-| india-paper-trading | one paper trade with explicit approval |
-| india-autopilot | unattended paper ticks, replay, market-hours loop |
-| india-data-manager | import real data, holidays, validation |
-| india-trade-journal | journal and export |
-| india-trade-review | performance review, "should I go live?" checklist |
-| india-live-trading | locked real-money desk: status, prepare, approve, record |
+| "get real data for the top 20 stocks" | india-data-manager → `data-fetch --universe large_caps_20 --indices --etf` |
+| "how is the market? risk on?" | india-market-regime → `regime` |
+| "which sectors are leading" | india-sector-rotation → `sectors` |
+| "find breakout / VCP / momentum stocks" | india-stock-screener → `screen` |
+| "technical view on KOTAKBANK" | india-technical-analyst → `technical` |
+| "full fundamental + technical view of INFY" | india-stock-analysis |
+| "scan the Nifty 500 for breakouts" | india-stock-screener → `universe-fetch NIFTY500`, `screen --universe NIFTY500` |
+| "are FIIs selling? any SEBI circular?" | india-news-research (agents) |
+| "which strategy works? test them all" | india-strategy-lab → `lab`, `strategies` |
+| "plan a trade, how many shares, where's my stop" | india-trade-planner → `plan`, `size`, `exit-plan` |
+| "review my Groww holdings" | india-portfolio-manager → `portfolio` |
+| "dividends / results for ITC" | india-corporate-actions, india-news-research |
+| "alert me if INFY crosses 1600" | india-alerts → `alerts` |
+| "trade on your own (paper)" | india-autopilot → `autopilot`, `replay` |
+| "a safer monthly ETF strategy (paper)" | india-allocation → `allocate` |
+| "run my daily routine" | india-daily-routine → `daily` |
+| "why was this blocked / protect my capital" | india-risk-manager |
+| "am I ready for real money?" | india-trade-review → `review`, `live status` |
 
-Agents (read-only): `india-strategy-critic` (second opinion on any result),
-`india-risk-auditor` (settings, journal and guard audit).
+The full map is in `skills/india-trading-navigator/SKILL.md`.
+
+## Protection, in order
+1. **Paper by default.** Only `live` commands concern real money, and they are locked.
+2. **Risk manager, in code, and its block is final.** It enforces:
+   - the budget, the per-order cap, and risk per trade **including charges**;
+   - daily, weekly and monthly loss limits, and a cooldown after 3 losses in a row;
+   - the **capital floor** (default 90% of the budget), stale-quote checks and the kill switch.
+3. **Market gate** (default): no new entries while Nifty 50 is below its
+   200-day average, or if its data is stale. On real data it lowered drawdowns
+   and losing months for every swing strategy (docs/STRATEGY_LAB.md).
+4. **Capital floor.**
+   - A trade may never put equity below the floor, even if it hits its stop
+     (open positions are valued at their stops).
+   - If the floor is breached anyway (gaps), the autopilot sells everything
+     and stops.
+   - It limits losses; nothing can guarantee them, or a profit.
+5. **Graduation, before any real order:** at least 30 paper trades on at least
+   20 days, on real data with live-read prices, and positive after charges.
+6. **Your explicit yes for each live order.** The approval expires after 5
+   minutes and works once.
+7. **Guard hook.** Claude Code denies any Groww order tool call that doesn't
+   match an approved ticket.
+
+## The money reality
+- **₹200:** a delivery round trip costs about ₹36 (18%), so every ₹200 trade
+  is blocked. That is the risk manager doing its job (`costs 200`).
+- **Below about ₹25,000:** only a single index ETF is economical. A 20-stock
+  basket needs about ₹1 lakh.
+- **Swing strategies:** they paid ₹30,000–₹83,000 in charges per ₹1 lakh over
+  9 years and lost money. Holding the same stocks paid ₹1,232.
+
+## Data
+- **History:** Yahoo Finance daily bars for NSE stocks, 17 NSE indices
+  (Nifty 50, India VIX, 13 sectors) and index ETFs. It is unofficial and
+  end-of-day, with 10 years of history plus dividends and splits.
+  Bad ticks are removed and listed.
+- **Live prices:** only what Claude reads with the Groww connector's
+  read-only tools at that moment.
+- **NSE holidays:** you fill `config/nse_holidays.yaml` from NSE's page,
+  because it refuses scripts.
+- **Synthetic sample:** `data/sample/` is SYNTHETIC test data.
+
+## Tests
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -e ".[dev]"
+python -m pytest
+```
+The suite covers:
+- strategies, indicators and charges;
+- the risk manager and capital floor;
+- the paper broker, autopilot, replay and lab;
+- every CLI command run end to end in a fresh project;
+- the live lock and guard hook;
+- a contract test that parses every command each SKILL.md tells Claude to run.
 
 ## Layout
 ```
-.claude/           settings.json (live guard hook)
-.claude-plugin/    plugin.json, marketplace.json
-agents/            2 read-only review agents
-config/            settings.example.yaml, nse_holidays.yaml, groww_tools.yaml
-skills/            13 Claude skills (SKILL.md)
-src/india_trading/ market_data, indicators, strategies, risk, brokers, execution,
-                   backtesting, simulation (timemachine, replay), analysis (breadth),
-                   monitoring, journal (store, review), workflows (supervisor, autopilot),
-                   live (graduation, ledger, desk, guard), cli.py
-tests/             unit / integration / safety
-docs/              REFERENCE_ANALYSIS, ARCHITECTURE, DATA_SOURCES, RISK_POLICY,
+.claude-plugin/    plugin.json, marketplace.json      hooks/       hooks.json (live guard)
+skills/            27 skills                           agents/      6 read-only agents
+scripts/           india.py (launcher), guard.sh, make_sample_data.py
+config/            settings.example.yaml, universes.yaml, sectors.yaml, alerts.example.yaml,
+                   nse_holidays.yaml, groww_tools.yaml
+src/india_trading/ market_data (csv, yahoo, importer, calendar), indicators, strategies (registry,
+                   ma_trend, trend: donchian/template/rsi2, rotation), risk, brokers, execution,
+                   backtesting (engine, portfolio, lab), simulation (timemachine, replay),
+                   analysis (regime, sectors, screener, technical, planner, portfolio, alerts,
+                   actions, breadth), workflows (supervisor, autopilot, allocation),
+                   journal, live (graduation, ledger, desk, guard), cli.py
+docs/              STRATEGY_LAB, REFERENCE_ANALYSIS, ARCHITECTURE, DATA_SOURCES, RISK_POLICY,
                    GROWW_INTEGRATION, BACKTESTING, OPERATIONS
-scripts/           make_sample_data.py (SYNTHETIC data)
 ```
 
-## Roadmap (priority order)
-1. Fill `config/nse_holidays.yaml`; load real adjusted NSE daily data into `data/real/` (`data-import`).
-2. Backtest + replay on 20+ real liquid stocks; keep the strategy only if test-period results are positive after charges.
-3. Inspect the Groww connector's tools; document them in `GROWW_INTEGRATION.md`.
-4. Market-regime gate on Nifty breadth / India VIX once a verified source exists.
-5. Only after weeks of reviewed paper trading: consider a verified, audited live adapter.
+## Not done / not verified
+- The Groww connector's tools have not been listed yet, so
+  `config/groww_tools.yaml` is empty. Until it is filled, every Groww order
+  tool is denied. The live path has never sent a real order.
+- The NSE holiday list for 2025, 2026 and 2027 is empty: weekday holidays
+  are not detected.
+- Fundamentals (earnings growth, valuation) have no verified free data feed:
+  the screener covers only the chart half of CANSLIM. Results come through
+  the research agents, from the filings, with sources.
+- Options and F&O are deliberately not supported. SEBI found about 9 in 10
+  F&O traders lose money, and the config refuses derivatives.
+- Not modelled: partial fills, circuit limits and price bands,
+  ASM/GSM lists, impact cost, and dividends in stock prices.
 
 Credits: ideas from `tradermonty/claude-trading-skills` and
-`Jakeschincariol/day-trader-skill` (both MIT). No code copied. See `docs/REFERENCE_ANALYSIS.md`.
+`Jakeschincariol/day-trader-skill` (both MIT). No code was copied. See
+`docs/REFERENCE_ANALYSIS.md` for what was adapted and an honest comparison.

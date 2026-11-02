@@ -13,11 +13,11 @@ Every order here is SIMULATED in `state/paper.db`. Nothing is sent to Groww.
 Always say "paper" or "simulated" when reporting a fill.
 
 ```bash
-python -m india_trading.cli paper start SYMBOL                     # replay: last close, NOT live
-python -m india_trading.cli paper start SYMBOL --price 412.5 --price-source groww-mcp
-python -m india_trading.cli paper start SYMBOL --as-of 2025-09-22  # historical replay
-python -m india_trading.cli paper status
-python -m india_trading.cli paper close SYMBOL --price 420 --price-source groww-mcp
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper start SYMBOL                     # replay: last close, NOT live
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper start SYMBOL --price 412.5 --price-source groww-mcp
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper start SYMBOL --as-of 2025-09-22  # historical replay
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper status
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper close SYMBOL --price 420 --price-source groww-mcp
 ```
 
 ## Approval

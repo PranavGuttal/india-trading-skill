@@ -1,0 +1,16 @@
+# Named stock lists for `data-fetch --universe NAME`, `lab --universe NAME`, `screen --universe NAME`.
+# These are hand-picked liquid NSE large caps, NOT an official index list
+# (index constituents change; check niftyindices.com for the current Nifty 50).
+universes:
+  large_caps_20:
+    note: development universe used for docs/STRATEGY_LAB.md
+    symbols: [RELIANCE, TCS, INFY, HDFCBANK, ICICIBANK, SBIN, ITC, LT, BHARTIARTL, HINDUNILVR,
+              AXISBANK, KOTAKBANK, MARUTI, SUNPHARMA, TITAN, BAJFINANCE, ASIANPAINT, HCLTECH, WIPRO, NTPC]
+  holdout_25:
+    note: different large caps used only to check results out of sample
+    symbols: [ADANIPORTS, APOLLOHOSP, BAJAJ-AUTO, BAJAJFINSV, BRITANNIA, CIPLA, COALINDIA, DIVISLAB,
+              DRREDDY, EICHERMOT, GRASIM, HDFCLIFE, HEROMOTOCO, HINDALCO, JSWSTEEL, M&M, NESTLEIND, ONGC,
+              POWERGRID, TATASTEEL, TECHM, ULTRACEMCO, TATACONSUM, PIDILITIND, DABUR]
+  index_etfs:
+    note: exchange-traded index funds (data-fetch --etf saves them to data/etf)
+    symbols: [NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES]

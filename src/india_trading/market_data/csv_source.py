@@ -30,6 +30,17 @@ class ValidationReport:
     warnings: list[str] = field(default_factory=list)
 
 
+def bad_ticks(df: pd.DataFrame, threshold: float = 0.4) -> pd.Series:
+    """Rows whose open AND close are >= threshold away from the median close
+    of the surrounding 7 bars: a 1-3 bar spike that reverts (e.g. a feed
+    printing 1/10th of the price). A real move that persists shifts the
+    median with it and is not flagged."""
+    if len(df) < 7:
+        return pd.Series(False, index=df.index)
+    med = df["close"].rolling(7, center=True, min_periods=4).median()
+    return ((df["close"] / med - 1).abs() >= threshold) & ((df["open"] / med - 1).abs() >= threshold)
+
+
 def validate_bars(df: pd.DataFrame, calendar: NSECalendar | None = None, jump_pct: float = 0.25) -> ValidationReport:
     errors, warnings = [], []
     missing = [c for c in REQUIRED if c not in df.columns]
@@ -51,6 +62,11 @@ def validate_bars(df: pd.DataFrame, calendar: NSECalendar | None = None, jump_pc
     bad = (df["high"] < df[["open", "close", "low"]].max(axis=1)) | (df["low"] > df[["open", "close", "high"]].min(axis=1))
     if bad.any():
         errors.append(f"{int(bad.sum())} rows where high/low do not contain open/close")
+    if not errors:
+        ticks = bad_ticks(df)
+        if ticks.any():
+            errors.append(f"{int(ticks.sum())} bad tick(s) (price spikes that revert), e.g. "
+                          f"{pd.Timestamp(df.loc[ticks, 'date'].iloc[0]).date()}; re-fetch or remove those rows")
     if not errors:
         rets = df["close"].pct_change().abs()
         jumps = df.loc[rets > jump_pct, "date"]

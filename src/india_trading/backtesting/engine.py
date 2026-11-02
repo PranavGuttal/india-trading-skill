@@ -24,6 +24,7 @@ from ..market_data.calendar import IST
 from ..models import Quote, TradeProposal
 from ..risk.costs import estimate_charges, roundtrip_costs
 from ..risk.manager import AccountState, KillSwitch, RiskManager, block_reason_key, pnl_history_stats
+from ..strategies.base import ExitPolicy, Strategy, close_rule_exit
 
 MIN_TRADES_FOR_EVIDENCE = 30
 
@@ -109,11 +110,32 @@ def run_backtest(
     df: pd.DataFrame,
     symbol: str,
     settings: Settings,
-    strategy: Callable[..., TradeProposal],
+    strategy: Callable[..., TradeProposal] | Strategy,
     data_source: str = "",
-    max_hold_days: int = 10,
+    max_hold_days: int | None = None,
     train_fraction: float = 0.7,
+    regime_index: pd.DataFrame | None = None,
 ) -> BTResult:
+    """`strategy` is a Strategy (its exit policy applies) or a plain
+    evaluate() callable (then: target, close < SMA50, max hold).
+    With settings.regime_gate == "index", `regime_index` (Nifty 50 bars) feeds
+    the market gate; without it the gate is switched off for this run."""
+    if settings.regime_gate == "index" and regime_index is None:
+        settings = settings.model_copy(update={"regime_gate": "off"})
+    gate = None
+    if regime_index is not None and settings.regime_gate == "index":
+        g = regime_index.reset_index(drop=True)
+        sm = g["close"].rolling(200, min_periods=200).mean()
+        gate = pd.Series((g["close"] > sm).to_numpy(), index=pd.DatetimeIndex(g["date"]))
+    if isinstance(strategy, Strategy):
+        policy, name, evaluate = strategy.exit, strategy.name, strategy.evaluate
+    else:
+        policy = ExitPolicy(take_profit=True, close_below="sma50", max_hold_days=10)
+        name = getattr(sys.modules.get(getattr(strategy, "__module__", ""), None), "NAME",
+                       getattr(strategy, "__name__", "strategy"))
+        evaluate = strategy
+    if max_hold_days is not None:
+        policy = ExitPolicy(**{**policy.__dict__, "max_hold_days": max_hold_days})
     df = df.reset_index(drop=True)
     x = add_indicators(df)
     rm = RiskManager(settings, KillSwitch(Path(settings.state_dir) / "__backtest_no_kill__"))
@@ -137,12 +159,12 @@ def run_backtest(
             if t > pos["entry_idx"] and o <= pos["stop"]:
                 exit_px, why = o, "gap below stop"
             elif l <= pos["stop"]:
-                exit_px, why = pos["stop"], "stop"
-            elif h >= pos["target"]:
+                exit_px, why = pos["stop"], "stop" if pos["stop"] <= pos["entry"] else "trailing stop"
+            elif policy.take_profit and h >= pos["target"]:
                 exit_px, why = max(o, pos["target"]) if t > pos["entry_idx"] else pos["target"], "target"
             elif pos["exit_next_open"]:
-                exit_px, why = o, "trend exit (close < SMA50)"
-            elif t - pos["entry_idx"] + 1 >= max_hold_days:
+                exit_px, why = o, pos["exit_next_open"]
+            elif t - pos["entry_idx"] + 1 >= policy.max_hold_days:
                 exit_px, why = c, "max hold"
             if exit_px is not None:
                 px = exit_px * (1 - slip)
@@ -153,8 +175,12 @@ def run_backtest(
                                       round(px, 2), ch, round(gross, 2), round(gross - ch, 2), why))
                 pos = None
             else:
-                sma50 = x["sma50"].iloc[t]
-                pos["exit_next_open"] = bool(not math.isnan(sma50) and c < sma50)
+                pos["hc"] = max(pos["hc"], c)
+                atr_t = x["atr14"].iloc[t]
+                if policy.trail_atr and not math.isnan(atr_t):
+                    pos["stop"] = max(pos["stop"], round(pos["hc"] - policy.trail_atr * atr_t, 2))
+                rule = close_rule_exit(policy, x.iloc[t])
+                pos["exit_next_open"] = ("trend exit (close < SMA50)" if rule == "close < sma50" else rule) if rule else False
 
         # ---- mark to market
         mtm = cash + (pos["qty"] * row["close"] if pos else 0.0)
@@ -163,7 +189,7 @@ def run_backtest(
 
         # ---- decide on close of t for t+1 (only if flat and a next bar exists)
         if pos is None and t + 1 < n:
-            prop = strategy(df.iloc[: t + 1], symbol, data_source, indicators=x.iloc[: t + 1])
+            prop = evaluate(df.iloc[: t + 1], symbol, data_source, indicators=x.iloc[: t + 1])
             if prop.decision != "TRADE":
                 continue
             signals += 1
@@ -172,7 +198,13 @@ def run_backtest(
             history = pnl_history_stats(((tr.exit_date, tr.pnl_net) for tr in trades), str(d.date()))
             acct = AccountState(cash_available=cash, open_positions=0, pending_orders=0,
                                 realised_pnl_today=0.0, trades_today=0, verified=True, source="backtest", **history)
-            dec = rm.evaluate(prop, quote, acct, now=as_of, trade_date=str(d.date()), session_open=True)
+            market = None
+            if gate is not None:
+                k = int(gate.index.searchsorted(d, side="right"))
+                ok = bool(gate.iloc[k - 1]) if k else None
+                market = (ok, "market gate: Nifty 50 below its 200-day average — no new entries" if ok is False
+                          else "market gate: no Nifty 50 data for this date")
+            dec = rm.evaluate(prop, quote, acct, now=as_of, trade_date=str(d.date()), session_open=True, market=market)
             if not dec.approved:
                 blocked += 1
                 for r in dec.reasons:
@@ -194,7 +226,7 @@ def run_backtest(
                 blocked += 1
                 continue
             cash -= qty * fill + buy_costs
-            pos = dict(qty=qty, entry=fill, stop=prop.stop, target=prop.target, entry_idx=t + 1,
+            pos = dict(qty=qty, entry=fill, stop=prop.stop, target=prop.target, entry_idx=t + 1, hc=fill,
                        entry_date=str(pd.Timestamp(nxt["date"]).date()), buy_costs=buy_costs, exit_next_open=False)
 
     equity = pd.Series(equity_vals, index=pd.DatetimeIndex(dates))
@@ -203,7 +235,7 @@ def run_backtest(
     bq = int(settings.max_experimental_allocation_inr // first_open)
     baseline = bq * (last_close - first_open) - roundtrip_costs(bq * first_open, bq * last_close, "delivery", settings.charges) if bq else 0.0
     return BTResult(
-        symbol=symbol, strategy=getattr(sys.modules.get(getattr(strategy, "__module__", ""), None), "NAME", getattr(strategy, "__name__", "strategy")), trades=trades, equity=equity,
+        symbol=symbol, strategy=name, trades=trades, equity=equity,
         starting_capital=settings.max_experimental_allocation_inr, days_in_market=in_mkt, total_days=n,
         signals=signals, blocked_by_risk=blocked, block_reasons=reasons, baseline_net=round(baseline, 2),
         split_index=min(n - 1, int(n * train_fraction)), data_source=data_source,

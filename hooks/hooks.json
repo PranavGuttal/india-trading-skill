@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*[Gg][Rr][Oo][Ww][Ww].*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\"",
+            "timeout": 20,
+            "onFailure": "block",
+            "statusMessage": "Live guard: checking Groww tool call"
+          }
+        ]
+      }
+    ]
+  }
+}

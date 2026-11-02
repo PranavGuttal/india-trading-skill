@@ -12,13 +12,13 @@ description: >-
 
 Read-only. Nothing in this skill can place, modify or cancel an order.
 
-## Commands (run from the project root)
+## Commands (run in the user's project folder)
 
 ```bash
-python -m india_trading.cli market-check        # NSE session, holiday-list status
-python -m india_trading.cli scan                # strategy on every CSV in data_dir
-python -m india_trading.cli monitor start --interval 300 --ticks 1   # one read-only tick
-python -m india_trading.cli monitor stop
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" market-check        # NSE session, holiday-list status
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" scan                # strategy on every CSV in data_dir
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" monitor start --interval 300 --ticks 1   # one read-only tick
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" monitor stop
 ```
 
 ## Using the Groww connector (if the user has enabled it)

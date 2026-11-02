@@ -11,10 +11,10 @@ description: >-
 # india-trade-review
 
 ```bash
-python -m india_trading.cli review                    # real paper account (state/paper.db)
-python -m india_trading.cli replay ...                # what the autopilot would have done historically
-python -m india_trading.cli backtest SYMBOL ...       # strategy-only check with train/test split
-python -m india_trading.cli journal --limit 50
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" review                    # real paper account (state/paper.db)
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" replay ...                # what the autopilot would have done historically
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" backtest SYMBOL ...       # strategy-only check with train/test split
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" journal --limit 50
 ```
 
 ## How to review

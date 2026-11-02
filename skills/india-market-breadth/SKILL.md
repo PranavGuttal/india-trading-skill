@@ -1,24 +1,26 @@
 ---
 name: india-market-breadth
 description: >-
-  Measure breadth and regime of the user's own NSE watchlist from local CSVs:
-  % above SMA50/SMA200, SMA20>SMA50 share, advancers/decliners, 52-week highs
-  and lows, and a RISK_ON / NEUTRAL / RISK_OFF label that can gate autopilot
-  entries. Use when the user asks "how is the market", "is it risk-on",
-  "market breadth", "regime", or "should the autopilot sit out".
+  Measure breadth of the user's own NSE watchlist or data folder from local
+  CSVs: % above SMA50/SMA200, SMA20>SMA50 share, advancers/decliners,
+  52-week highs and lows, and a RISK_ON / NEUTRAL / RISK_OFF label that can
+  gate autopilot entries. Use when the user asks for "breadth of my
+  watchlist" or "should the autopilot sit out"; for the Nifty-based market
+  regime use india-market-regime instead.
 ---
 
 # india-market-breadth
 
 ```bash
-python -m india_trading.cli breadth [--data-dir data/real] [--as-of 2025-09-22]
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" breadth --data-dir data/real
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" breadth --data-dir data/real --as-of 2025-09-22
 ```
 
-- This is breadth of the CSVs in the data folder, NOT Nifty or NSE-wide
-  breadth: no verified source for that is wired in. Say so every time.
+- This is breadth of the CSVs in the folder, NOT NSE-wide breadth. For the
+  market itself (Nifty 50 trend, distribution days, India VIX) run
+  `regime` (india-market-regime) and say which one you used.
 - Fewer than 5 symbols: the output says the reading is noisy. Repeat that.
-- `regime_gate: true` in `config/settings.yaml` makes the autopilot skip new
-  entries while the regime is RISK_OFF (exits still run). It only ever
+- `regime_gate: watchlist` in `config/settings.yaml` makes the autopilot skip
+  new entries while this breadth is RISK_OFF (exits still run). The default
+  `index` gate uses the Nifty 50 trend instead, which was tested. It only ever
   removes trades; it never adds any.
-- India VIX and official NSE advance/decline data are on the roadmap only
-  after a verified source exists. Do not quote numbers for them.

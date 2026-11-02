@@ -16,7 +16,8 @@ blocked (fail closed).
 | daily_loss_limit_inr | 20 |
 | weekly / monthly loss limit | 2× / 4× daily (₹40 / ₹80) unless set |
 | max_consecutive_losses → loss_cooldown_days | 3 → 2 business days |
-| regime_gate (autopilot only) | false |
+| regime_gate (market gate) | index: no new entries while Nifty 50 ≤ its 200-day average or its data is missing/stale |
+| capital_floor_pct | 90 (% of the budget that must survive; 0 = off) |
 | max_trades_per_day | 2 |
 | min_reward_risk | 1.5 |
 | min_reward_to_cost | 2.0 |
@@ -49,13 +50,34 @@ account verified → already holding → max positions (incl. pending) → max
 trades/day → daily loss limit → weekly loss limit → monthly loss limit →
 losing-streak cooldown → cost-aware qty (budget, order cap, risk incl.
 charges, cash) → reward:risk → reward vs 2× charges → net reward > 0 →
-remaining daily/weekly/monthly allowance → duplicate intent.
+remaining daily/weekly/monthly allowance → capital floor → duplicate intent.
+(The market gate check sits with the session check, before account checks.)
+
+## Market gate
+Default `regime_gate: index`. In the lab it reduced max drawdown, losing months and
+charges for all four swing strategies on both universes and both halves of
+2017-2026 (STRATEGY_LAB.md, "Loss reduction"). It blocks new entries only; exits
+always run. Without fresh Nifty 50 data it blocks (fail closed).
+
+## Capital floor
+`capital_floor_pct` (default 90) is the share of the budget that must survive.
+- **Before a trade:** it is allowed only if its loss at the stop, charges
+  included, still leaves equity above the floor, with every open position
+  valued at its own stop (paper broker and live ledger both report this
+  `equity_at_stops`). With ₹10,000 and 90%, at most ₹1,000 is ever at risk.
+- **After a breach:** if equity at current prices is found below the floor
+  (a gap through a stop can do this), the paper autopilot and the allocation
+  pilot sell everything and engage the kill switch. Only the user releases it.
+- It limits losses; it cannot guarantee them, and nothing can guarantee a profit.
 
 ## Autopilot (paper only)
 The autopilot approves paper entries automatically, but every entry still
 goes through all checks above. `AutoPilot` refuses a live adapter in its
-constructor. Exits (stop, target, close < SMA50, max hold) are not blocked by
-entry limits or the kill switch, because they only reduce risk.
+constructor. Exits follow the strategy's exit policy (stop raised by a trailing
+stop where the strategy has one, target, close rules, max hold) and are not
+blocked by entry limits or the kill switch, because they only reduce risk.
+The allocation pilot (`allocate --paper`) uses its own paper account and its own
+deterministic checks (kill switch, capital floor, cash incl. charges, order cap).
 
 ## Limits of these controls
 They do **not** guarantee a loss can't exceed plan. Gaps through a stop,
@@ -71,6 +93,6 @@ expiry), and the guard hook match. The live budget is the same
 `max_experimental_allocation_inr` (₹200 by default). See GROWW_INTEGRATION.md.
 
 ## Kill switch
-`python -m india_trading.cli kill-switch on` creates `state/KILL_SWITCH`.
+`python scripts/india.py kill-switch on` creates `state/KILL_SWITCH`.
 While it exists, every new order is blocked and the monitor stops. It
 survives restarts.

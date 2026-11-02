@@ -1,7 +1,7 @@
 # Copy to config/settings.yaml and edit. Environment variables override this file.
 # SAFE DEFAULTS: paper mode, live disabled, human approval required.
 
-trading_mode: paper            # paper | live  (live has NO adapter in this release)
+trading_mode: paper            # paper | live  (live = the locked `live` desk only; see docs/GROWW_INTEGRATION.md)
 live_trading_enabled: false
 require_human_approval: true
 
@@ -25,13 +25,23 @@ max_quote_age_seconds: 120
 max_bar_age_days: 5
 slippage_bps: 10
 product: delivery              # delivery | intraday
-regime_gate: false             # true = autopilot skips new entries while watchlist breadth is RISK_OFF
+regime_gate: index             # index = no NEW entries while Nifty 50 < its 200-day average (tested: fewer losses;
+                               # blocks if Nifty data is missing/stale) | watchlist (breadth) | off
+# Capital floor: % of the budget that must survive. A new trade is allowed only if
+# losing it at its stop (charges incl.) keeps equity above the floor, with open
+# positions valued at their stops. Below it: sell everything + kill switch. 0 = off.
+capital_floor_pct: 90
+# Signal strategy for analyze/scan/autopilot/live: ma_trend_pullback | donchian_trend |
+# trend_template | rsi2_reversion  (`strategies` lists them; docs/STRATEGY_LAB.md has results)
+strategy: trend_template       # least-losing swing strategy in the lab; none beat buy & hold
 
 allow_short_selling: false     # true is rejected by validation
 allow_derivatives: false       # true is rejected by validation
 allow_leverage: false          # true is rejected by validation
 
-data_dir: data/sample          # point at data/real once you have real adjusted CSVs
+data_dir: data/sample          # SYNTHETIC sample; after `data-fetch` use data/real
+indices_dir: data/indices      # Nifty 50, India VIX, sectors (`data-fetch --indices`)
+etf_dir: data/etf              # NIFTYBEES etc. (`data-fetch --etf`)
 state_dir: state
 watchlist: [SYNTH_TREND, SYNTH_CHOP, SYNTH_LARGE]
 

@@ -1,8 +1,16 @@
 # Backtesting
 
 ```bash
-python -m india_trading.cli backtest SYMBOL [--capital 20000 --risk 200] [--out reports/trades.csv]
+python scripts/india.py backtest SYMBOL --strategy donchian_trend --capital 20000 --risk 200 --out reports/trades.csv
+python scripts/india.py lab --universe large_caps_20 --data-dir data/real     # portfolio level, see STRATEGY_LAB.md
 ```
+
+Two engines share the same rules (decide on the close, fill at the next
+open + slippage, stop before target, Groww charges): the **single-stock
+backtest** (one stock, the full risk manager incl. circuit breaker and
+capital floor, as paper trading would see it) and the **portfolio lab**
+(`backtesting/portfolio.py`: many stocks, one cash account, max positions,
+benchmarks, earlier/later halves; measures the strategy itself).
 
 ## Method
 - Decision on the close of bar *t* using rows 0..t only; fill at bar *t+1*
@@ -12,7 +20,8 @@ python -m india_trading.cli backtest SYMBOL [--capital 20000 --risk 200] [--out 
 - Charges per trade from `risk/costs.py` (Groww schedule).
 - Inside a bar, the stop is checked before the target (conservative). A gap
   below the stop exits at the open, not at the stop.
-- Exits: stop, target, close < SMA50 (exit next open), max hold days.
+- Exits: the strategy's ExitPolicy — stop (trailing for trend strategies), target if it takes profit,
+  close rules (exit next open), max hold days.
 - Chronological 70/30 train/test split; never shuffled.
 - Baseline: buy & hold with the same capital, after one round trip of charges.
 - Verdict: fewer than 30 trades → INCONCLUSIVE; full or test period ≤ 0 → NO EDGE SHOWN.
@@ -22,7 +31,7 @@ python -m india_trading.cli backtest SYMBOL [--capital 20000 --risk 200] [--out 
 
 ## Replay (autopilot day by day)
 ```bash
-python -m india_trading.cli replay [--start 2024-01-01 --end 2025-06-30] [--capital 20000 --risk 200] [--symbols A,B]
+python scripts/india.py replay [--start 2024-01-01 --end 2025-06-30] [--capital 20000 --risk 200] [--symbols A,B]
 ```
 Runs the paper autopilot once per trading day at 15:20 IST with that day's
 close as the price, over all watchlist symbols together (so max positions,
@@ -38,8 +47,12 @@ State goes to `state/replay/` and is replaced on each run. SYNTHETIC sample,
 target; charges for the quantity are deducted. It answers "how often does
 this plan hit target vs stop", not "will it work".
 
-Not modelled yet: partial fills, circuit limits/price bands, corporate
-actions (use adjusted data), liquidity limits, holidays without a verified list.
+Not modelled yet: partial fills, circuit limits/price bands, dividends in
+stock prices (split-adjusted only), liquidity/impact cost, holidays without a verified list.
+
+## Portfolio lab — all strategies on 10 years of real data
+See STRATEGY_LAB.md: no strategy beat buy & hold after charges; the trend
+filter only reduced drawdowns.
 
 ## First REAL-data result (2026-11-01)
 Data: `data-fetch` (Yahoo Finance, unofficial), 20 large NSE stocks

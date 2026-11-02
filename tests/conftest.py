@@ -13,7 +13,9 @@ from india_trading.models import Quote, TradeProposal
 
 @pytest.fixture
 def settings(tmp_path) -> Settings:
-    return Settings(state_dir=str(tmp_path / "state"), data_dir=str(tmp_path / "data"))
+    # mechanics tests pin the original strategy and switch the market gate off (it has its own tests)
+    return Settings(state_dir=str(tmp_path / "state"), data_dir=str(tmp_path / "data"),
+                    strategy="ma_trend_pullback", regime_gate="off")
 
 
 @pytest.fixture
@@ -21,7 +23,8 @@ def big_settings(tmp_path) -> Settings:
     """A practice budget large enough that charges do not dominate."""
     return Settings(state_dir=str(tmp_path / "state"), data_dir=str(tmp_path / "data"),
                     max_experimental_allocation_inr=20000, max_single_order_value_inr=20000,
-                    max_risk_per_trade_inr=200, daily_loss_limit_inr=600)
+                    max_risk_per_trade_inr=200, daily_loss_limit_inr=600,
+                    strategy="ma_trend_pullback", regime_gate="off")
 
 
 @pytest.fixture

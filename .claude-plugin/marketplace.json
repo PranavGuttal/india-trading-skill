@@ -1,11 +1,15 @@
 {
   "name": "india-trading",
-  "owner": { "name": "Pranav Guttal" },
+  "owner": {
+    "name": "Pranav Guttal"
+  },
+  "description": "India (NSE/Groww) trading research, risk control and paper-trading skills for Claude.",
   "plugins": [
     {
       "name": "india-trading-skill",
       "source": "./",
-      "description": "NSE research, risk control and PAPER trading with Groww charges; real-money desk locked behind graduation and a guard hook."
+      "description": "NSE research (regime, sectors, screener, strategy lab), risk control with a capital floor, and PAPER trading with Groww charges; real-money desk locked behind graduation and a guard hook.",
+      "version": "0.4.0"
     }
   ]
 }

@@ -1,39 +1,69 @@
 ---
 name: india-trading-navigator
 description: >-
-  Map a trading request to the right india-* skill and command, and explain
-  what the toolkit can and cannot do. Use when the user asks "what can you
-  do", "how do I start", "which command", "help me trade on NSE/Groww", or
-  the request does not clearly match one skill.
+  Map an Indian stock-market (NSE, Groww) request to the right india-* skill
+  and command, run first-time setup, and explain what the toolkit can and
+  cannot do. Use when the user asks "what can you do", "how do I start",
+  "help me trade on NSE/Groww", "set this up", "which command", or the
+  request does not clearly match one skill.
 ---
 
 # india-trading-navigator
 
-| User wants | Skill | Command |
-|---|---|---|
-| Market open? scan setups | india-market-monitor | `market-check`, `scan` |
-| Breadth / regime | india-market-breadth | `breadth` |
-| Analyse one stock, backtest | india-trade-research | `analyze`, `backtest` |
-| Odds of a specific plan | india-time-machine | `timemachine` |
-| Charges, break-even, size | india-cost-calculator | `costs` |
-| Why blocked, kill switch | india-risk-manager | `risk-status`, `kill-switch` |
-| One paper trade with approval | india-paper-trading | `paper start/close/status` |
-| Trade on its own (paper), replay history | india-autopilot | `autopilot`, `replay` |
-| Load real data, holidays | india-data-manager | `data-import`, `scan` |
-| Journal / export | india-trade-journal | `journal` |
-| How am I doing, go live? | india-trade-review | `review` |
-| Real-money order (locked) | india-live-trading | `live status/prepare/approve/record` |
+Every command runs in the user's project folder as
 
-All commands: `python -m india_trading.cli <command>` from the project root,
-after `pip install -e ".[dev]"`.
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" doctor
+```
+
+(use `python3` if `python` is not found). First time only:
+`python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" --setup` installs the
+packages into the plugin's own `.venv`, then run `doctor` and do what it lists.
+
+## Which skill
+
+| The user wants | Skill | Commands |
+|---|---|---|
+| Set up, check the install | india-setup | `--setup`, `doctor` |
+| Real NSE data, indices, ETFs, holidays | india-data-manager | `data-fetch`, `data-import` |
+| How is the market? risk-on? | india-market-regime | `regime` |
+| Which sectors lead / lag | india-sector-rotation | `sectors` |
+| Find stocks / setups (breakout, VCP, momentum) | india-stock-screener | `screen` |
+| Chart read of one stock | india-technical-analyst | `technical` |
+| Everything about one stock (fundamental + technical) | india-stock-analysis | `technical`, `actions`, agents |
+| Nifty 500 / official index lists | india-data-manager | `universe-fetch`, `data-fetch --universe NIFTY500` |
+| Analyse + backtest one stock | india-trade-research | `analyze`, `backtest` |
+| Which strategy works? compare all | india-strategy-lab | `strategies`, `lab` |
+| Size, plan, stop/targets, exits | india-trade-planner | `size`, `plan`, `exit-plan` |
+| Odds of a plan | india-time-machine | `timemachine` |
+| Charges, break-even | india-cost-calculator | `costs` |
+| My holdings: concentration, review | india-portfolio-manager | `portfolio` |
+| Dividends, splits, results | india-corporate-actions | `actions` |
+| News, SEBI circulars, results, FII/DII flows, scenarios | india-news-research | agents |
+| Price / setup alerts | india-alerts | `alerts` |
+| Why blocked, kill switch, capital floor | india-risk-manager | `risk-status`, `kill-switch` |
+| One paper trade with approval | india-paper-trading | `paper start/close/status` |
+| Trade on its own (paper), replay | india-autopilot | `autopilot`, `replay` |
+| Monthly ETF / basket / rotation (paper) | india-allocation | `allocate` |
+| Morning / evening routine | india-daily-routine | `daily` |
+| Journal / export | india-trade-journal | `journal` |
+| How am I doing, ready for real money? | india-trade-review | `review`, `live status` |
+| Real-money order (locked) | india-live-trading | `live ...` |
+| Watchlist-only breadth | india-market-breadth | `breadth` |
+| Session open? polling monitor | india-market-monitor | `market-check`, `monitor` |
 
 ## Always true
 
-- Paper by default. Real money only through india-live-trading, which stays
-  locked until graduation and needs the user's explicit yes per order.
-- The Groww connector is read-only everywhere except the guarded order call
-  in india-live-trading; list its tools before using any.
-- The risk manager's block is final; never suggest loosening limits.
-- `data/sample/` is SYNTHETIC; <30 trades is inconclusive; not advice.
-- Suggested first session: `status` → `costs 200` → `scan` →
-  `replay --capital 20000 --risk 200` (study budget) → `review`.
+- PAPER by default. Real money only through india-live-trading, locked until
+  graduation, with the user's explicit yes per order and the guard hook.
+- The Groww connector is read-only everywhere except that guarded order call;
+  list its tools before using any. Never guess tool names.
+- The risk manager's block is final; never suggest loosening limits. The
+  capital floor (default 90% of the budget) stops trading before it is
+  crossed, and the market gate allows no new entries while Nifty 50 is below
+  its 200-day average. Options/F&O are deliberately not supported.
+- Data: Yahoo Finance daily bars (unofficial, end of day); `data/sample/` is
+  SYNTHETIC. Fewer than 30 trades is inconclusive. Research, not advice.
+- Tested result to state when asked "will it make money": on 10 years of real
+  NSE data no strategy here beat simply holding after charges; the trend
+  filter only reduced drawdowns (docs/STRATEGY_LAB.md). Never promise profit.

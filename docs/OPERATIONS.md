@@ -1,8 +1,20 @@
 # Operations
 
-## Daily paper routine (≈10 minutes)
-1. `python -m india_trading.cli status` — confirm PAPER, limits, session.
-2. `python -m india_trading.cli scan` — what is setting up (read-only).
+Commands: `python <plugin>/scripts/india.py <command>` in your project folder
+(inside this repo: `python scripts/india.py <command>`).
+
+## One-command routine
+`daily --fetch --paper` refreshes data, then runs regime → sectors → watchlist
+screen → ETF allocation check → alerts → exit plan → one paper autopilot tick →
+risk status, and saves `reports/daily/YYYY-MM-DD.md`. Run it after 18:00 IST.
+
+## Monthly (last trading day)
+`allocate` shows whether the trend filter says ETF or cash this month;
+`allocate --paper` rebalances the separate allocation paper account.
+
+## Manual paper routine (≈10 minutes)
+1. `status` — confirm PAPER, limits, session.
+2. `scan` / `screen` — what is setting up (read-only).
 3. For a TRADE candidate: read its current price (Groww app or connector),
    then `paper start SYMBOL --price <p> --price-source groww-app`.
 4. Read the ticket. Type `yes` only if you agree with this exact order.

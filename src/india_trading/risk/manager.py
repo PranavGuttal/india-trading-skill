@@ -37,6 +37,8 @@ class AccountState:
     last_loss_date: Optional[str] = None
     realised_pnl_week: float = 0.0
     realised_pnl_month: float = 0.0
+    # cash + every open position valued at its stop (None -> cash only, the most conservative)
+    equity_at_stops: Optional[float] = None
 
 
 def pnl_history_stats(closed: Iterable[tuple[str, float]], trade_date: str) -> dict:
@@ -107,7 +109,10 @@ class RiskManager:
         now: datetime,
         trade_date: str,
         session_open: Optional[bool] = None,
+        market: Optional[tuple[Optional[bool], str]] = None,
     ) -> RiskDecision:
+        """market: (ok, note) from analysis.market_gate. Required when
+        settings.regime_gate == "index": missing or unknown blocks (fail closed)."""
         s = self.s
         block: list[str] = []
         warn: list[str] = []
@@ -137,6 +142,10 @@ class RiskManager:
         if quote.price <= proposal.stop:
             block.append("price is already at or below the stop")
 
+        if s.regime_gate == "index":
+            ok, note = market if market is not None else (None, "market gate: Nifty 50 trend not supplied")
+            if ok is not True:
+                block.append(note)
         if session_open is False:
             block.append("market session is closed")
         elif session_open is None:
@@ -204,6 +213,13 @@ class RiskManager:
                               s.monthly_loss_limit + min(0.0, account.realised_pnl_month))
         if risk_inr > remaining_today:
             block.append(f"risk ₹{risk_inr:.2f} exceeds remaining daily/weekly/monthly loss allowance ₹{remaining_today:.2f}")
+        if s.capital_floor_pct > 0:
+            worst = account.equity_at_stops if account.equity_at_stops is not None else account.cash_available
+            headroom = worst - s.capital_floor
+            if risk_inr > headroom:
+                block.append(f"capital floor ₹{s.capital_floor:.2f} ({s.capital_floor_pct:g}% of ₹"
+                             f"{s.max_experimental_allocation_inr:.0f}): a loss of ₹{risk_inr:.2f} at the stop would leave "
+                             f"₹{worst - risk_inr:.2f}")
 
         intent = OrderIntent(
             symbol=proposal.symbol, side=Side.BUY, qty=qty, limit_price=round(entry, 2),

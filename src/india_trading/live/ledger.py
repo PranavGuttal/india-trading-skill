@@ -159,8 +159,12 @@ class LiveLedger:
         entries_today = sum(1 for t in self.tickets(1000)
                             if t["trade_date"] == trade_date and t["side"] == "BUY" and t["filled_qty"])
         cash = 0.0 if broker_cash is None else min(broker_cash, settings.max_experimental_allocation_inr - deployed)
+        # allocation equity with every position valued at its stop (0 if it has none)
+        at_stops = (settings.max_experimental_allocation_inr + sum(p for _, p in closed) - deployed
+                    + sum(p["qty"] * (p["stop"] or 0.0) for p in pos.values()))
         return AccountState(
             cash_available=max(0.0, cash), open_positions=len(pos), pending_orders=len(open_tickets),
+            equity_at_stops=round(at_stops, 2),
             realised_pnl_today=round(sum(today), 2), trades_today=entries_today,
             verified=broker_cash is not None, source="live-ledger+groww-cash",
             open_symbols=set(pos), pending_intent_ids={t["intent_id"] for t in self.tickets(1000)

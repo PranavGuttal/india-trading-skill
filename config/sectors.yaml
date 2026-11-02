@@ -1,0 +1,36 @@
+# Symbol -> sector map used by `sectors`, `screen` and `portfolio`.
+# APPROXIMATE and editable: grouped by broad business line, with the Nifty
+# sector index used for relative strength. Verify against NSE's industry
+# classification (nseindia.com, stock page -> "Industry") before relying on it.
+# Index names are the keys of INDICES in market_data/yahoo_source.py.
+sectors:
+  Banks:
+    index: NIFTYBANK
+    symbols: [HDFCBANK, ICICIBANK, SBIN, AXISBANK, KOTAKBANK, INDUSINDBK]
+  Financial Services:
+    index: NIFTYFINSERV
+    symbols: [BAJFINANCE, BAJAJFINSV, HDFCLIFE, SBILIFE, SHRIRAMFIN, JIOFIN]
+  IT:
+    index: NIFTYIT
+    symbols: [TCS, INFY, HCLTECH, WIPRO, TECHM, LTIM]
+  FMCG:
+    index: NIFTYFMCG
+    symbols: [ITC, HINDUNILVR, BRITANNIA, NESTLEIND, TATACONSUM, DABUR]
+  Auto:
+    index: NIFTYAUTO
+    symbols: [MARUTI, BAJAJ-AUTO, EICHERMOT, HEROMOTOCO, M&M]
+  Pharma & Healthcare:
+    index: NIFTYPHARMA
+    symbols: [SUNPHARMA, CIPLA, DIVISLAB, DRREDDY, APOLLOHOSP]
+  Metals:
+    index: NIFTYMETAL
+    symbols: [HINDALCO, JSWSTEEL, TATASTEEL]
+  Energy & Power:
+    index: NIFTYENERGY
+    symbols: [RELIANCE, ONGC, COALINDIA, NTPC, POWERGRID, BPCL]
+  Infrastructure:
+    index: NIFTYINFRA
+    symbols: [LT, ADANIPORTS, BHARTIARTL, ULTRACEMCO, GRASIM]
+  Consumer:
+    index: NIFTYCONSUMPTION
+    symbols: [TITAN, ASIANPAINT, PIDILITIND]

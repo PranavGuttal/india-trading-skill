@@ -16,7 +16,7 @@ Real money. Follow every step; if any step fails, stop and say why.
 ## 0. Is it unlocked?
 
 ```bash
-python -m india_trading.cli live status
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" live status
 ```
 
 If GRADUATION is NOT PASSED or live switches are off, say so, list the

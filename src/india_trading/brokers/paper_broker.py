@@ -122,8 +122,10 @@ class PaperBroker(BrokerAdapter):
             ).fetchone()[0]
         positions = self.get_positions()
         history = pnl_history_stats(((t["trade_date"], t["pnl_net"]) for t in self.closed_trades()), trade_date)
+        cash = self.cash()
         return AccountState(
-            cash_available=self.cash(),
+            cash_available=cash,
+            equity_at_stops=round(cash + sum(p.qty * (p.stop or 0.0) for p in positions), 2),
             open_positions=len(positions),
             pending_orders=len(pending),
             realised_pnl_today=self.realised_pnl(trade_date),
@@ -134,6 +136,15 @@ class PaperBroker(BrokerAdapter):
             pending_intent_ids={r[0] for r in pending} | {r[0] for r in today},
             **history,
         )
+
+    def update_stop(self, symbol: str, stop: float) -> bool:
+        """Raise a position's stop (trailing). Never lowers it. True if changed."""
+        with self._conn() as c:
+            r = c.execute("SELECT stop FROM positions WHERE symbol=? AND qty>0", (symbol,)).fetchone()
+            if r is None or (r["stop"] is not None and stop <= r["stop"]):
+                return False
+            c.execute("UPDATE positions SET stop=? WHERE symbol=?", (round(stop, 2), symbol))
+            return True
 
     def get_order_status(self, intent_id: str) -> Optional[Order]:
         with self._conn() as c:

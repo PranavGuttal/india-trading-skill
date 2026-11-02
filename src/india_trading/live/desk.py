@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from ..analysis.market_gate import market_ok
 from ..brokers.groww_adapter import GrowwAdapter
 from ..brokers.paper_broker import PaperBroker
 from ..config import Settings
@@ -80,8 +81,9 @@ class LiveDesk:
             return DeskResult(False, "NO_TRADE", reasons=st.proposal.reasons)
         quote = Quote(symbol=sym, price=price, timestamp=now, source=f"manual:{price_source}")
         account = self.ledger.account_state(self.s, str(now.date()), broker_cash)
+        market = market_ok(self.s.indices_dir, now.date(), self.s.max_bar_age_days)
         dec = RiskManager(self.s).evaluate(st.proposal, quote, account, now=now, trade_date=str(now.date()),
-                                           session_open=self.calendar.status(now).is_open)
+                                           session_open=self.calendar.status(now).is_open, market=market)
         self.journal.record("RISK_APPROVED" if dec.approved else "RISK_BLOCKED", "live",
                             "; ".join(dec.reasons) or "all checks passed", symbol=sym,
                             data_source=st.proposal.data_source,

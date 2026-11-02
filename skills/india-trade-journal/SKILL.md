@@ -10,9 +10,9 @@ description: >-
 # india-trade-journal
 
 ```bash
-python -m india_trading.cli journal --limit 50
-python -m india_trading.cli journal --mode paper --export reports/journal.csv
-python -m india_trading.cli paper status
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" journal --limit 50
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" journal --mode paper --export reports/journal.csv
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper status
 ```
 
 ## Review checklist

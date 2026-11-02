@@ -43,7 +43,7 @@ connector and gated in four places:
    data with live-read prices), and the RiskManager approves using cash read
    from Groww. It writes a PREPARED ticket to `state/live.db`.
 2. `live approve` needs the user's explicit per-order yes; it expires in 5 min.
-3. **Guard hook** (`.claude/settings.json` → `python -m india_trading.live.guard`)
+3. **Guard hook** (plugin `hooks/hooks.json` → `scripts/guard.sh` → `india.py --guard`; inside this repo also `.claude/settings.json`; it denies if no Python with the packages can start)
    runs before every Groww MCP tool call. Unclassified tools → deny. Order
    tools → deny unless the call's symbol/side/qty/limit price match one
    approved, unexpired, unsent ticket; then "ask", so Claude Code shows the

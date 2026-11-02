@@ -27,14 +27,15 @@ from .logging_setup import setup_logging
 from .market_data.calendar import IST, NSECalendar
 from .market_data.csv_source import DataError, load_csv
 from .market_data.importer import import_csv
-from .market_data.yahoo_source import SOURCE as YAHOO_SOURCE, fetch_to_csv
+from .market_data.yahoo_source import INDICES, SECTOR_INDICES, SOURCE as YAHOO_SOURCE, fetch_to_csv, load_events
 from .models import OrderIntent, Quote, Side
 from .monitoring.monitor import Monitor
 from .risk.costs import estimate_charges
 from .risk.manager import KillSwitch, RiskManager
 from .simulation.replay import format_replay, run_replay
 from .simulation.timemachine import format_result, simulate
-from .strategies import ma_trend
+from .strategies import SIGNAL_STRATEGIES, get as get_strategy, ma_trend
+from .paths import PLUGIN_ROOT, config_file
 from .workflows.autopilot import AutoPilot, format_tick
 from .workflows.supervisor import Step, Supervisor
 
@@ -43,10 +44,13 @@ PAPER_BANNER = "[PAPER MODE — simulated only, nothing is sent to Groww]"
 
 def _ctx(args):
     s = load_settings(args.config)
+    if getattr(args, "strategy", None):
+        get_strategy(args.strategy)                        # unknown name -> KeyError, reported by main()
+        s = s.model_copy(update={"strategy": args.strategy})
     if s.trading_mode == "live" or s.live_trading_enabled:
-        print("WARNING: live settings detected, but this release has NO live broker adapter. "
-              "All execution stays on the paper broker.", file=sys.stderr)
-    cal = NSECalendar.from_yaml(Path("config") / "nse_holidays.yaml")
+        print("NOTE: live settings detected. Real orders exist only through the locked `live` desk and the "
+              "guard hook; every other command stays on the paper broker.", file=sys.stderr)
+    cal = NSECalendar.from_yaml(config_file("nse_holidays.yaml"))
     journal = Journal(s.state_path("journal.db"))
     return s, cal, journal
 
@@ -153,7 +157,7 @@ def cmd_scan(args):
         if not rep.ok:
             print(f"{f.stem:14} INVALID {'; '.join(rep.errors)}")
             continue
-        p = ma_trend.evaluate(df, f.stem, src)
+        p = get_strategy(s.strategy).evaluate(df, f.stem, src)
         print(f"{f.stem:14} {p.decision:8} {('; '.join(p.reasons))[:110]}")
     return 0
 
@@ -166,7 +170,12 @@ def cmd_backtest(args):
     if not rep.ok:
         print("INVALID DATA:", rep.errors)
         return 2
-    res = run_backtest(df, args.symbol.upper(), s, ma_trend.evaluate, src)
+    nifty = _index(s, "NIFTY50", required=False) if s.regime_gate == "index" else None
+    if s.regime_gate == "index" and nifty is None:
+        print("NOTE: market gate is off for this backtest: no Nifty 50 data (run `data-fetch --indices`).")
+    res = run_backtest(df, args.symbol.upper(), s, get_strategy(s.strategy), src, regime_index=nifty)
+    if nifty is not None:
+        print("Market gate ON: no new entries while Nifty 50 was below its 200-day average.")
     print(format_report(res))
     if args.out:
         out = Path(args.out)
@@ -316,7 +325,7 @@ def cmd_timemachine(args):
         if any(v is not None for v in levels):
             print("Give all of --entry, --stop and --target, or none (then the strategy's plan is used).")
             return 2
-        p = ma_trend.evaluate(df, sym, src)
+        p = get_strategy(s.strategy).evaluate(df, sym, src)
         if p.decision != "TRADE":
             print(f"{sym}: strategy says NO_TRADE as of {p.as_of:%Y-%m-%d} ({'; '.join(p.reasons)[:160]}).")
             print("Nothing to simulate. To test your own plan pass --entry --stop --target.")
@@ -508,35 +517,490 @@ def cmd_live(args):
 def cmd_data_fetch(args):
     s, cal, _ = _ctx(args)
     symbols = [x.strip().upper() for x in (args.symbols or []) if x.strip()] or list(s.watchlist)
+    if args.universe:
+        symbols = _universe(args.universe, s)
     if any(sym.startswith("SYNTH_") for sym in symbols):
         print("SYNTH_* are synthetic sample symbols, not NSE listings. Give real NSE symbols, e.g. INFY TCS.")
         return 2
-    print(f"Downloading {len(symbols)} NSE symbol(s) from {YAHOO_SOURCE}, {args.years}y daily, into {args.out} ...")
+    jobs = [] if (args.indices or args.etf) and not args.symbols else [(symbols, args.out)]
+    if args.indices:
+        jobs.append((list(INDICES), s.indices_dir))
+    if args.etf:
+        jobs.append((ETF_SYMBOLS, s.etf_dir))
     bad = 0
-    for sym, status, msgs in fetch_to_csv(symbols, args.out, args.years, cal):
-        bad += status != "OK"
-        print(f"  {sym:12} {status:7} {msgs[0] if msgs else ''}")
-        for m in msgs[1:]:
-            print(f"  {'':12} warning: {m}")
+    for syms, out in jobs:
+        print(f"Downloading {len(syms)} NSE symbol(s) from {YAHOO_SOURCE}, {args.years}y daily, into {out} ...")
+        for sym, status, msgs in fetch_to_csv(syms, out, args.years, cal):
+            bad += status != "OK"
+            print(f"  {sym:12} {status:7} {msgs[0] if msgs else ''}")
+            for m in msgs[1:]:
+                print(f"  {'':12} warning: {m}")
     print("Unofficial free data for personal research; re-run after 18:00 IST for the latest close.")
     return 1 if bad else 0
+
+
+
+
+# ---------------------------------------------------------------- research commands (v0.3)
+ETF_SYMBOLS = ["NIFTYBEES", "JUNIORBEES", "BANKBEES", "GOLDBEES"]
+
+
+def _universe(name: str, s: Settings | None = None) -> list[str]:
+    """A named list from config/universes.yaml, or an official index list
+    downloaded with `universe-fetch` (e.g. NIFTY500)."""
+    import yaml
+    from .market_data import index_lists
+    data = yaml.safe_load(config_file("universes.yaml").read_text(encoding="utf-8")) or {}
+    u = (data.get("universes") or {})
+    if name in u:
+        return [str(x).upper() for x in u[name]["symbols"]]
+    folder = s.universes_dir if s is not None else "data/universes"
+    df = index_lists.load(name, folder)
+    if df is not None:
+        return [str(x).upper() for x in df["Symbol"]]
+    raise KeyError(f"unknown universe {name!r}: not in config/universes.yaml ({', '.join(u)}) and no "
+                   f"{folder}/{name.upper()}.csv — download it with `universe-fetch {name.upper()}`")
+
+
+def _sector_map(s: Settings) -> dict[str, dict]:
+    """Official NSE industries from downloaded index lists win over the approximate config/sectors.yaml."""
+    from .analysis.sectors import load_sector_map
+    from .market_data import index_lists
+    return {**load_sector_map(config_file("sectors.yaml")), **index_lists.official_sector_map(s.universes_dir)}
+
+
+def cmd_universe_fetch(args):
+    from .market_data import index_lists
+    s, _, _ = _ctx(args)
+    names = [n.upper() for n in args.names] or ["NIFTY500"]
+    bad = 0
+    for n in names:
+        try:
+            p, df = index_lists.fetch(n, s.universes_dir)
+        except DataError as e:
+            print(f"  {n:16} ERROR {e}")
+            bad += 1
+            continue
+        series = ", ".join(f"{k} {v}" for k, v in df["Series"].value_counts().items())
+        print(f"  {n:16} OK {len(df)} stocks ({series}) → {p}  [{index_lists.BASE.format(file=index_lists.LISTS[n])}]")
+    print("Official NSE Indices lists; constituents change at each review. Next: "
+          f"`data-fetch --universe {names[0]}` (about 1 second per stock).")
+    return 1 if bad else 0
+
+
+def _frames(s: Settings, cal, data_dir: str | None = None, symbols: list[str] | None = None) -> dict[str, pd.DataFrame]:
+    """Valid CSVs from a folder (all, or the given symbols). Invalid files are skipped with a note."""
+    base = Path(data_dir or s.data_dir)
+    files = [base / f"{x}.csv" for x in symbols] if symbols else sorted(base.glob("*.csv"))
+    out = {}
+    for f in files:
+        try:
+            df, rep, _ = load_csv(f, f.stem, cal)
+        except DataError as e:
+            print(f"  skipped {f.stem}: {e}", file=sys.stderr)
+            continue
+        if rep.ok:
+            out[f.stem.upper()] = df
+        else:
+            print(f"  skipped {f.stem}: {'; '.join(rep.errors)}", file=sys.stderr)
+    return out
+
+
+def _index(s: Settings, name: str, required: bool = True) -> pd.DataFrame | None:
+    p = Path(s.indices_dir) / f"{name}.csv"
+    if not p.exists():
+        if required:
+            raise DataError(f"no {name} data at {p}; run `data-fetch --indices`")
+        return None
+    df, rep, _ = load_csv(p, name)
+    if not rep.ok:
+        raise DataError(f"{p}: " + "; ".join(rep.errors))
+    return df
+
+
+def _as_of(args):
+    return pd.Timestamp(args.as_of).date() if getattr(args, "as_of", None) else None
+
+
+def _symbols_arg(args) -> list[str] | None:
+    if getattr(args, "symbols", None):
+        return [x.strip().upper() for x in args.symbols.split(",") if x.strip()]
+    if getattr(args, "universe", None):
+        return _universe(args.universe, load_settings(args.config))
+    return None
+
+
+def cmd_strategies(args):
+    from .workflows.allocation import ALLOCATION_STRATEGIES
+    s, _, _ = _ctx(args)
+    print(f"SIGNAL STRATEGIES (per stock; used by analyze/scan/backtest/autopilot/live). Active: {s.strategy}")
+    for st in SIGNAL_STRATEGIES.values():
+        print(f"  {st.name} v{st.version}: {st.summary}\n      exits: {st.exit.describe()}\n      idea: {st.origin}")
+    print("ALLOCATION STRATEGIES (portfolio, monthly; used by `allocate` and `lab`):")
+    for k, v in ALLOCATION_STRATEGIES.items():
+        print(f"  {k}: {v}")
+    print("Lab results on real NSE data: docs/STRATEGY_LAB.md. Run `lab` to re-test on your data.")
+    return 0
+
+
+def cmd_lab(args):
+    from .backtesting.lab import LAB_STRATEGIES, format_lab, run_lab
+    from .backtesting.portfolio import LabConfig
+    s, cal, _ = _ctx(args)
+    frames = _frames(s, cal, args.data_dir, _symbols_arg(args))
+    if len(frames) < 2:
+        print(f"Need at least 2 valid stock CSVs in {args.data_dir or s.data_dir} (run data-fetch).")
+        return 1
+    nifty = _index(s, "NIFTY50")
+    etf_path = Path(s.etf_dir) / "NIFTYBEES.csv"
+    etf = None
+    if etf_path.exists():
+        df, rep, _ = load_csv(etf_path, "NIFTYBEES")
+        etf = {"NIFTYBEES": df} if rep.ok else None
+    names = [x.strip() for x in args.strategies.split(",")] if args.strategies else list(LAB_STRATEGIES)
+    if args.gate:
+        names += [f"{n}+gate" for n in names if n in SIGNAL_STRATEGIES]
+    first = max(df["date"].iloc[0] for df in frames.values()) + pd.Timedelta(days=380)   # indicator warm-up
+    start = pd.Timestamp(args.start).date() if args.start else first.date()
+    end = pd.Timestamp(args.end).date() if args.end else min(df["date"].iloc[-1] for df in frames.values()).date()
+    split = pd.Timestamp(args.split).date() if args.split else (pd.Timestamp(start) + (pd.Timestamp(end) - pd.Timestamp(start)) / 2).date()
+    cfg = LabConfig(capital=args.capital, max_positions=args.max_positions, risk_pct=args.risk_pct / 100,
+                    max_position_pct=1 / args.max_positions, slippage_bps=s.slippage_bps, start=start, end=end,
+                    product=s.product, charges=s.charges)
+    rows, verdicts = run_lab(frames, nifty, etf, names, cfg, split)
+    hdr = (f"STRATEGY LAB — {len(frames)} stocks, {start} → {end}, split {split}, study capital ₹{args.capital:,.0f} "
+           f"(PAPER research), max {args.max_positions} positions, Groww charges + {s.slippage_bps:g} bps slippage")
+    print(format_lab(rows, verdicts, hdr))
+    return 0
+
+
+def cmd_regime(args):
+    from .analysis.regime import compute, format_regime
+    s, cal, _ = _ctx(args)
+    r = compute(_index(s, "NIFTY50"), _index(s, "INDIAVIX", required=False),
+                _frames(s, cal, args.data_dir, _symbols_arg(args)), _as_of(args))
+    print(format_regime(r))
+    return 0
+
+
+def cmd_sectors(args):
+    from .analysis.sectors import format_sectors, rank
+    s, _, _ = _ctx(args)
+    nifty = _index(s, "NIFTY50")
+    secs = {n: d for n in SECTOR_INDICES if (d := _index(s, n, required=False)) is not None}
+    if not secs:
+        print("No sector index data; run `data-fetch --indices`.")
+        return 1
+    rows = rank(secs, nifty, _as_of(args))
+    print(format_sectors(rows, str((_as_of(args) or nifty["date"].iloc[-1].date()))))
+    return 0
+
+
+def cmd_screen(args):
+    from .analysis.screener import format_screen, screen
+    from .analysis.sectors import load_sector_map
+    s, cal, _ = _ctx(args)
+    frames = _frames(s, cal, args.data_dir, _symbols_arg(args))
+    if not frames:
+        print(f"No valid CSVs in {args.data_dir or s.data_dir}.")
+        return 1
+    rows = screen(frames, _as_of(args), _sector_map(s))
+    print(format_screen(rows, args.setup, args.min_rs, args.top))
+    return 0
+
+
+def cmd_technical(args):
+    from .analysis.sectors import load_sector_map
+    from .analysis.technical import analyse, format_tech
+    s, cal, _ = _ctx(args)
+    sym = args.symbol.upper()
+    df, rep, src = load_csv(_data_path(s, args, sym), sym, cal)
+    if not rep.ok:
+        print("INVALID DATA:", rep.errors)
+        return 2
+    info = _sector_map(s).get(sym, {})
+    sector_df = _index(s, info["index"], required=False) if info.get("index") else None
+    t = analyse(df, sym, src, _index(s, "NIFTY50", required=False), sector_df, info.get("sector", ""),
+                load_events(Path(args.data_dir or s.data_dir), sym), _as_of(args))
+    print(format_tech(t))
+    return 0
+
+
+def cmd_size(args):
+    from .analysis.planner import size
+    s, _, _ = _ctx(args)
+    risk = args.risk if args.risk is not None else s.max_risk_per_trade_inr
+    budget = args.budget if args.budget is not None else min(s.max_single_order_value_inr, s.max_experimental_allocation_inr)
+    z = size(args.entry, args.stop, risk, budget, s, args.target)
+    print(f"POSITION SIZE (long, whole shares, Groww {s.product} charges) entry ₹{args.entry:,.2f} stop ₹{args.stop:,.2f}")
+    print(f"  risk limit ₹{risk:,.2f} | budget ₹{budget:,.2f} → {z.qty} shares = ₹{z.value:,.2f} (limited by {z.limited_by})")
+    print(f"  loss at stop incl. charges ₹{z.loss_at_stop:,.2f} | buy charges ₹{z.buy_costs:.2f} | round trip ≈ ₹{z.roundtrip_costs:.2f}")
+    for n in z.notes:
+        print("  note:", n)
+    return 0 if z.qty else 1
+
+
+def cmd_plan(args):
+    from .analysis.planner import format_plan, plan
+    s, cal, _ = _ctx(args)
+    sym = args.symbol.upper()
+    strat = get_strategy(s.strategy)
+    df, rep, src = load_csv(_data_path(s, args, sym), sym, cal)
+    if not rep.ok:
+        print("INVALID DATA:", rep.errors)
+        return 2
+    if args.as_of:
+        df = df[df["date"].dt.date <= _as_of(args)].reset_index(drop=True)
+    levels = (args.entry, args.stop, args.target)
+    if None in levels:
+        if any(v is not None for v in levels):
+            print("Give all of --entry, --stop and --target, or none (then the strategy's plan is used).")
+            return 2
+        p = strat.evaluate(df, sym, src)
+        if p.decision != "TRADE":
+            print(f"{sym}: {strat.name} says NO_TRADE as of {p.as_of:%Y-%m-%d}: {'; '.join(p.reasons)[:200]}")
+            print("Pass --entry --stop --target to plan your own levels.")
+            return 1
+        levels = (p.entry, p.stop, p.target)
+    pl = plan(sym, *levels, s, strat.exit, strat.name if args.entry is None else "manual", args.risk, args.budget)
+    print(format_plan(pl))
+    print(f"  data {src} as of {df['date'].iloc[-1].date()} | limits from settings: risk ₹{s.max_risk_per_trade_inr}, "
+          f"order cap ₹{s.max_single_order_value_inr}, capital floor {s.capital_floor_pct:g}%")
+    if args.odds and pl.size.qty:
+        r = simulate(df, sym, pl.entry, pl.stop, pl.target, s, qty=pl.size.qty, max_hold_days=min(strat.exit.max_hold_days, 20),
+                     paths=5000, data_source=src)
+        print("\n" + format_result(r))
+    return 0
+
+
+def cmd_exit_plan(args):
+    from .analysis.planner import exit_plan
+    from .indicators.core import add_indicators
+    s, cal, _ = _ctx(args)
+    b = _broker(s)
+    strat = get_strategy(s.strategy)
+    pos = b.get_positions()
+    print(PAPER_BANNER)
+    if not pos:
+        print("No open paper positions.")
+        return 0
+    for p in pos:
+        try:
+            df, rep, _ = load_csv(_data_path(s, args, p.symbol), p.symbol, cal)
+        except DataError as e:
+            print(f"  {p.symbol}: {e}")
+            continue
+        x = add_indicators(df.iloc[-300:].reset_index(drop=True))
+        e = exit_plan(p.symbol, p.qty, p.avg_price, p.stop or 0.0, p.target, p.opened_at.date().isoformat(), x, strat.exit)
+        print(f"  {e['symbol']} {e['qty']} @ ₹{e['avg']} → ₹{e['close']} ({e['r_now']:+.2f}R, ₹{e['open_pnl']:+,.2f}) | "
+              f"stop ₹{e['stop']} → effective ₹{e['effective_stop']}{' (raise it)' if e['raise_stop'] else ''} | "
+              f"{e['dist_to_stop_pct']}% above stop | close rule: {e['close_rule']} | "
+              f"held {e['held_bars']}/{e['max_hold']} bars{' — TIME EXIT DUE' if e['time_exit_due'] else ''}")
+    print(f"  Exit rules ({strat.name}): {strat.exit.describe()}. The autopilot applies them on its next tick.")
+    return 0
+
+
+def cmd_portfolio(args):
+    from .analysis.portfolio import Holding, format_portfolio, load_holdings, review
+    from .analysis.sectors import load_sector_map
+    s, cal, _ = _ctx(args)
+    if args.holdings:
+        holdings, source = load_holdings(args.holdings), f"file {args.holdings}"
+    else:
+        holdings = [Holding(p.symbol, p.qty, p.avg_price, p.stop) for p in _broker(s).get_positions()]
+        source = "paper account"
+    if not holdings:
+        print(f"No holdings in the {source}. Pass --holdings FILE (CSV/JSON exported or read from Groww).")
+        return 1
+    syms = [h.symbol for h in holdings]
+    base = Path(args.data_dir or s.data_dir)
+    frames = _frames(s, cal, str(base), [x for x in syms if (base / f"{x}.csv").exists()])
+    prices = {k: q.price for k, q in _parse_prices(args.prices, args.price_source).items()} if args.prices else None
+    events = {x: load_events(base, x) for x in syms}
+    print(format_portfolio(review(holdings, frames, _sector_map(s), prices, events),
+                           source + (f", prices {args.price_source}" if args.prices else ", prices = last close in data")))
+    return 0
+
+
+def cmd_alerts(args):
+    from .analysis.alerts import evaluate, format_alerts, load_rules
+    s, cal, _ = _ctx(args)
+    rules = load_rules(args.file)
+    positions = _broker(s).get_positions()
+    syms = sorted({str(r["symbol"]).upper() for r in rules} | {p.symbol for p in positions})
+    base = Path(args.data_dir or s.data_dir)
+    frames = _frames(s, cal, str(base), [x for x in syms if (base / f"{x}.csv").exists()])
+    prices = {k: q.price for k, q in _parse_prices(args.prices, args.price_source).items()} if args.prices else None
+    if not rules and not positions:
+        print(f"No alert rules in {args.file} and no paper positions. See config/alerts.example.yaml.")
+        return 0
+    as_of = max((df["date"].iloc[-1].date() for df in frames.values()), default="-")
+    print(format_alerts(evaluate(rules, frames, prices, positions), f"{as_of}" + (" + current prices" if prices else "")))
+    return 0
+
+
+def cmd_actions(args):
+    from .analysis.actions import format_actions, summarise
+    s, cal, _ = _ctx(args)
+    base = Path(args.data_dir or s.data_dir)
+    syms = [x.upper() for x in args.symbols] or sorted(p.stem for p in (base / "events").glob("*.json"))
+    rows = []
+    for sym in syms:
+        ev = load_events(base, sym)
+        try:
+            df, _, _ = load_csv(base / f"{sym}.csv", sym)
+        except DataError:
+            print(f"  {sym}: no price data in {base}", file=sys.stderr)
+            continue
+        rows.append(summarise(sym, df, ev))
+    if not rows:
+        print(f"No corporate-action data in {base}/events (run data-fetch).")
+        return 1
+    print(format_actions(rows))
+    return 0
+
+
+def cmd_allocate(args):
+    from .workflows.allocation import AllocationPilot, format_view, targets
+    s, cal, journal = _ctx(args)
+    nifty = _index(s, "NIFTY50")
+    if args.strategy_name == "etf_trend":
+        frames = _frames(s, cal, s.etf_dir, [args.etf])
+    else:
+        frames = _frames(s, cal, args.data_dir, _symbols_arg(args) or list(s.watchlist))
+    if not frames:
+        print("No data for this allocation (run data-fetch --etf / data-fetch).")
+        return 1
+    pilot = AllocationPilot(s, journal)
+    view = targets(args.strategy_name, nifty, frames, set(pilot.held()), etf=args.etf)
+    print(PAPER_BANNER)
+    print(format_view(view, pilot.held()))
+    if not args.paper:
+        print("  (view only; add --paper to rebalance the separate allocation PAPER account)")
+        return 0
+    if not view.is_month_end and not args.force:
+        print(f"  Not a rebalance day; the rule checks at month end ({view.next_check}). Use --force to rebalance now.")
+        return 0
+    if args.prices:
+        quotes, now = _parse_prices(args.prices, args.price_source), datetime.now(IST)
+    else:
+        last = {sym: df for sym, df in frames.items()}
+        d = max(df["date"].iloc[-1].date() for df in last.values())
+        now = datetime.combine(d, time(15, 20), tzinfo=IST)
+        quotes = {sym: Quote(symbol=sym, price=float(df["close"].iloc[-1]), timestamp=now,
+                             source="replay:last-close (NOT live)") for sym, df in last.items()}
+        print(f"  REPLAY rebalance at the {d} closes — not live prices.")
+    for line in pilot.rebalance(view, quotes, now):
+        print("  " + line)
+    print(f"  Allocation paper cash ₹{pilot.broker.cash():,.2f}; holdings {pilot.held() or 'none'}")
+    return 0
+
+
+def cmd_daily(args):
+    """The routine (tradermonty workflows, day-trader morning flow) in one command."""
+    import contextlib
+    import io
+    s, cal, _ = _ctx(args)
+    steps = []
+    if args.fetch:
+        steps.append(("Refresh data", ["data-fetch", "--indices", "--etf"]))
+        steps.append(("Refresh watchlist", ["data-fetch"]))
+    steps += [("Market regime", ["regime"]), ("Sector rotation", ["sectors"]),
+              ("Watchlist screen", ["screen", "--symbols", ",".join(s.watchlist)]),
+              ("Allocation check (etf_trend)", ["allocate", "--strategy-name", "etf_trend"]),
+              ("Alerts", ["alerts"]), ("Open paper positions", ["exit-plan"])]
+    if args.paper:
+        steps.append(("Paper autopilot tick (last closes)", ["autopilot"]))
+    steps.append(("Risk status", ["risk-status"]))
+    out = [f"# Daily routine {datetime.now(IST):%Y-%m-%d %H:%M} IST (paper; research, not advice)"]
+    for title, argv in steps:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                main(["--config", args.config] + argv
+                     + (["--strategy", args.strategy] if args.strategy and argv[0] in ("autopilot", "exit-plan") else []))
+            except Exception as e:                 # one failed step does not stop the routine
+                print(f"step failed: {type(e).__name__}: {e}")
+        out += [f"\n## {title}", "```", buf.getvalue().rstrip(), "```"]
+    text = "\n".join(out)
+    print(text)
+    if args.out:
+        d = Path(args.out)
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{datetime.now(IST):%Y-%m-%d}.md"
+        f.write_text(text, encoding="utf-8")
+        print(f"\nsaved {f}")
+    return 0
+
+
+def cmd_doctor(args):
+    """Environment and setup check, with the next step for anything missing."""
+    import importlib
+    import platform
+    s, cal, _ = _ctx(args)
+    ok, todo = [], []
+    ok.append(f"Python {platform.python_version()} ({sys.executable})")
+    for mod in ("pandas", "numpy", "pydantic", "yaml"):
+        try:
+            m = importlib.import_module(mod)
+            ok.append(f"{mod} {getattr(m, '__version__', '')}")
+        except ImportError:
+            todo.append(f"install {mod}: python \"{PLUGIN_ROOT / 'scripts' / 'india.py'}\" --setup")
+    ok.append(f"plugin folder {PLUGIN_ROOT}")
+    ok.append(f"project folder {Path.cwd()}")
+    (ok if Path(args.config).exists() else todo).append(
+        f"settings {args.config}" if Path(args.config).exists() else
+        f"no {args.config}: built-in safe defaults in use (copy config/settings.example.yaml to customise)")
+    ok.append(f"strategy {s.strategy} | budget ₹{s.max_experimental_allocation_inr:g} | risk/trade ₹{s.max_risk_per_trade_inr:g} "
+              f"| capital floor {s.capital_floor_pct:g}% (₹{s.capital_floor:g}) | mode {s.trading_mode}")
+    data = Path(s.data_dir)
+    n = len(list(data.glob("*.csv"))) if data.exists() else 0
+    if n and not any(p.name.startswith("SYNTH_") for p in data.glob("*.csv")):
+        ok.append(f"{n} stock CSVs in {data}")
+    else:
+        todo.append(f"real data: data-fetch (watchlist) — {data} has {n} files"
+                    + (" (SYNTHETIC sample)" if n else ""))
+    for name, folder in (("indices", s.indices_dir), ("ETFs", s.etf_dir)):
+        k = len(list(Path(folder).glob("*.csv"))) if Path(folder).exists() else 0
+        (ok if k else todo).append(f"{k} {name} CSVs in {folder}" if k else f"{name}: data-fetch --{'indices' if name == 'indices' else 'etf'}")
+    year = datetime.now(IST).year
+    (ok if cal.covers(year) else todo).append(
+        f"NSE holidays for {year} listed" if cal.covers(year) else
+        f"NSE holidays for {year} missing: fill config/nse_holidays.yaml from the official NSE circular")
+    tools = load_tools()
+    (ok if tools["read_only"] or tools["order_tools"] else todo).append(
+        f"Groww tools classified: {len(tools['read_only'])} read-only, {len(tools['order_tools'])} order" if tools["read_only"] or tools["order_tools"]
+        else "Groww tools not classified yet: connect Groww, list its tools, fill config/groww_tools.yaml (orders stay denied until then)")
+    hook = Path(".claude/settings.json")
+    plugin_hook = PLUGIN_ROOT / "hooks" / "hooks.json"
+    ok.append("guard hook: " + ", ".join(x for x, y in (("project .claude/settings.json", hook.exists()),
+                                                        ("plugin hooks/hooks.json", plugin_hook.exists())) if y) or "none")
+    print("DOCTOR — india-trading-skill")
+    for x in ok:
+        print(f"  ✓ {x}")
+    for x in todo:
+        print(f"  ✗ {x}")
+    if not todo:
+        print("  nothing to do")
+    return 0 if not todo else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="india_trading", description="NSE research + paper-trading toolkit (no live orders).")
     ap.add_argument("--config", default="config/settings.yaml", help="YAML settings (optional)")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    strategy_help = f"signal strategy ({', '.join(SIGNAL_STRATEGIES)}); default from settings"
 
     sub.add_parser("status", help="show mode, limits and NSE session").set_defaults(fn=cmd_status)
     sub.add_parser("market-check", help="NSE session status").set_defaults(fn=cmd_market_check)
     p = sub.add_parser("scan", help="run the strategy on every CSV in the data dir")
-    p.add_argument("--data-dir"); p.set_defaults(fn=cmd_scan)
+    p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help); p.set_defaults(fn=cmd_scan)
     p = sub.add_parser("analyze", help="analyse one symbol from its CSV (no orders)")
-    p.add_argument("symbol"); p.add_argument("--data-dir")
+    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help)
     p.add_argument("--as-of", help="historical replay: use only bars up to this date (YYYY-MM-DD)")
     p.set_defaults(fn=cmd_analyze)
-    p = sub.add_parser("backtest", help="backtest ma_trend_pullback on one CSV")
-    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--capital", type=float)
+    p = sub.add_parser("backtest", help="backtest a signal strategy on one CSV (single stock)")
+    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help); p.add_argument("--capital", type=float)
     p.add_argument("--risk", type=float, help="max ₹ risk per trade (default 1% of capital)")
     p.add_argument("--out", help="write trades CSV"); p.set_defaults(fn=cmd_backtest)
 
@@ -549,6 +1013,7 @@ def build_parser() -> argparse.ArgumentParser:
         q.add_argument("--price", type=float, help="current price you read (e.g. from Groww); omit for REPLAY of last close")
         q.add_argument("--price-source", default="user-entered", help="where --price came from, e.g. groww-mcp")
         q.add_argument("--as-of", help="historical replay: use only bars up to this date (YYYY-MM-DD)")
+        q.add_argument("--strategy", help=strategy_help)
         if name == "start":
             q.add_argument("--approve", help="non-interactive approval text for PAPER orders, e.g. yes")
         q.set_defaults(fn=fn)
@@ -565,19 +1030,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ticks", type=int, help="stop after N ticks"); p.add_argument("--data-dir")
     p.set_defaults(fn=cmd_monitor)
     p = sub.add_parser("timemachine", help="Monte-Carlo odds of one long plan (stop vs target) from the stock's own daily bars")
-    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--as-of")
+    p.add_argument("symbol"); p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help); p.add_argument("--as-of")
     p.add_argument("--entry", type=float); p.add_argument("--stop", type=float); p.add_argument("--target", type=float)
     p.add_argument("--qty", type=int, help="default: what the risk manager would size")
-    p.add_argument("--hold", type=int, default=ma_trend.PARAMS.max_hold_days, help="max hold days")
+    p.add_argument("--hold", type=int, default=ma_trend.PARAMS.max_hold_days, help="max hold days to simulate")
     p.add_argument("--paths", type=int, default=10_000); p.add_argument("--lookback", type=int, default=250)
     p.add_argument("--seed", type=int, default=19); p.set_defaults(fn=cmd_timemachine)
     p = sub.add_parser("autopilot", help="one unattended PAPER tick: manage exits, then auto-approved paper entries")
-    p.add_argument("--data-dir")
+    p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help)
     p.add_argument("--prices", help="current prices, e.g. INFY=1520.5,TCS=3901 (omit for a replay tick at the last close)")
     p.add_argument("--price-source", default="user-entered", help="where --prices came from, e.g. groww-mcp")
     p.set_defaults(fn=cmd_autopilot)
     p = sub.add_parser("replay", help="run the paper autopilot day by day over past data (separate state)")
-    p.add_argument("--data-dir"); p.add_argument("--start"); p.add_argument("--end")
+    p.add_argument("--data-dir"); p.add_argument("--strategy", help=strategy_help); p.add_argument("--start"); p.add_argument("--end")
     p.add_argument("--symbols", help="comma list; default: watchlist")
     p.add_argument("--capital", type=float); p.add_argument("--risk", type=float)
     p.add_argument("--out", help="output folder (default state/replay; replaced each run)")
@@ -596,7 +1061,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_data_import)
     p = sub.add_parser("data-fetch", help="download real NSE daily candles (Yahoo Finance, unofficial) into data/real/")
     p.add_argument("symbols", nargs="*", help="NSE symbols, e.g. INFY TCS RELIANCE (default: watchlist)")
-    p.add_argument("--years", type=int, default=5); p.add_argument("--out", default="data/real")
+    p.add_argument("--years", type=int, default=10); p.add_argument("--out", default="data/real")
+    p.add_argument("--universe", help="config/universes.yaml name or a downloaded index list, e.g. NIFTY500")
+    p.add_argument("--indices", action="store_true", help="also fetch Nifty 50, India VIX and sector indices")
+    p.add_argument("--etf", action="store_true", help="also fetch index ETFs (NIFTYBEES, JUNIORBEES, BANKBEES, GOLDBEES)")
     p.set_defaults(fn=cmd_data_fetch)
     live = sub.add_parser("live", help="REAL-MONEY desk (locked until graduation + live switches); never sends orders itself")
     lsub = live.add_subparsers(dest="lcmd", required=True)
@@ -606,6 +1074,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
     q = lsub.add_parser("prepare", help="analyse + risk-check + write a live BUY ticket (needs graduation)")
     q.add_argument("symbol"); q.add_argument("--price", type=float, required=True)
+    q.add_argument("--strategy", help=strategy_help)
     q.add_argument("--price-source", required=True, help="e.g. groww-mcp (read just now)")
     q.add_argument("--cash", type=float, help="available cash read from Groww just now (required to pass)")
     q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
@@ -622,6 +1091,66 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--order-id"); q.add_argument("--filled-qty", type=int, default=0)
     q.add_argument("--avg-price", type=float); q.add_argument("--note"); q.add_argument("--data-dir")
     q.set_defaults(fn=cmd_live)
+
+    # ---- v0.3 research commands
+    sub.add_parser("strategies", help="list signal and allocation strategies with their rules").set_defaults(fn=cmd_strategies)
+    p = sub.add_parser("lab", help="portfolio strategy lab vs Nifty and buy & hold, earlier/later halves (PAPER research)")
+    p.add_argument("--strategies", help="comma list (default: all)"); p.add_argument("--data-dir")
+    p.add_argument("--symbols", help="comma list (default: every CSV in the data dir)"); p.add_argument("--universe")
+    p.add_argument("--start"); p.add_argument("--end"); p.add_argument("--split", help="date dividing the halves")
+    p.add_argument("--capital", type=float, default=100_000); p.add_argument("--max-positions", type=int, default=5)
+    p.add_argument("--risk-pct", type=float, default=1.0, help="%% of equity risked per signal trade")
+    p.add_argument("--gate", action="store_true", help="also run each signal strategy with the Nifty 50 market gate")
+    p.set_defaults(fn=cmd_lab)
+    p = sub.add_parser("regime", help="NSE market regime: Nifty trend filter, distribution days, FTD, India VIX, breadth")
+    p.add_argument("--as-of"); p.add_argument("--data-dir"); p.add_argument("--symbols"); p.add_argument("--universe")
+    p.set_defaults(fn=cmd_regime)
+    p = sub.add_parser("sectors", help="NSE sector indices ranked by relative strength vs Nifty 50")
+    p.add_argument("--as-of"); p.set_defaults(fn=cmd_sectors)
+    p = sub.add_parser("screen", help="multi-setup screener with RS rating and stage over a universe")
+    p.add_argument("--setup", help="only rows with this setup, e.g. donchian_trend, near_high, momentum_burst")
+    p.add_argument("--min-rs", type=int, default=0); p.add_argument("--top", type=int, default=30)
+    p.add_argument("--as-of"); p.add_argument("--data-dir"); p.add_argument("--symbols"); p.add_argument("--universe")
+    p.set_defaults(fn=cmd_screen)
+    p = sub.add_parser("technical", help="one-stock technical report (trend, levels, RS vs Nifty/sector, strategies)")
+    p.add_argument("symbol"); p.add_argument("--as-of"); p.add_argument("--data-dir"); p.set_defaults(fn=cmd_technical)
+    p = sub.add_parser("size", help="whole-share position size with loss at stop incl. charges")
+    p.add_argument("entry", type=float); p.add_argument("stop", type=float); p.add_argument("--target", type=float)
+    p.add_argument("--risk", type=float, help="₹ you accept to lose (default: settings)")
+    p.add_argument("--budget", type=float, help="₹ for this position (default: settings order cap)")
+    p.set_defaults(fn=cmd_size)
+    p = sub.add_parser("plan", help="full trade plan: levels, R-multiples, size, charges, break-even, exits (+ odds)")
+    p.add_argument("symbol"); p.add_argument("--strategy", help=strategy_help)
+    p.add_argument("--entry", type=float); p.add_argument("--stop", type=float); p.add_argument("--target", type=float)
+    p.add_argument("--risk", type=float); p.add_argument("--budget", type=float); p.add_argument("--as-of")
+    p.add_argument("--odds", action="store_true", help="add time-machine odds"); p.add_argument("--data-dir")
+    p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("exit-plan", help="open paper positions: trailing stop, close rule, time exit, R now")
+    p.add_argument("--strategy", help=strategy_help); p.add_argument("--data-dir"); p.set_defaults(fn=cmd_exit_plan)
+    p = sub.add_parser("portfolio", help="holdings review: weights, sectors, correlation, review triggers (no selling)")
+    p.add_argument("--holdings", help="CSV/JSON of symbol,qty,avg_price (e.g. read from Groww); default: paper account")
+    p.add_argument("--prices", help="current prices SYM=PX,..."); p.add_argument("--price-source", default="user-entered")
+    p.add_argument("--data-dir"); p.set_defaults(fn=cmd_portfolio)
+    p = sub.add_parser("alerts", help="check price/setup alert rules and paper-position alerts (no orders)")
+    p.add_argument("--file", default="config/alerts.yaml"); p.add_argument("--prices")
+    p.add_argument("--price-source", default="user-entered"); p.add_argument("--data-dir"); p.set_defaults(fn=cmd_alerts)
+    p = sub.add_parser("actions", help="dividends and splits from the fetched data (past ex-dates)")
+    p.add_argument("symbols", nargs="*"); p.add_argument("--data-dir"); p.set_defaults(fn=cmd_actions)
+    p = sub.add_parser("allocate", help="monthly allocation strategies: today's targets; --paper rebalances a PAPER account")
+    p.add_argument("--strategy-name", default="etf_trend", choices=["etf_trend", "trend_filtered_core", "momentum_rotation"])
+    p.add_argument("--etf", default="NIFTYBEES"); p.add_argument("--paper", action="store_true")
+    p.add_argument("--force", action="store_true", help="rebalance even if today is not month end")
+    p.add_argument("--prices"); p.add_argument("--price-source", default="user-entered")
+    p.add_argument("--data-dir"); p.add_argument("--symbols"); p.add_argument("--universe"); p.set_defaults(fn=cmd_allocate)
+    p = sub.add_parser("daily", help="daily routine: regime, sectors, screen, allocation, alerts, positions (+ paper tick)")
+    p.add_argument("--fetch", action="store_true", help="refresh data first (internet)")
+    p.add_argument("--paper", action="store_true", help="also run one paper autopilot tick at the last closes")
+    p.add_argument("--strategy", help=strategy_help); p.add_argument("--out", default="reports/daily")
+    p.set_defaults(fn=cmd_daily)
+    sub.add_parser("doctor", help="check the installation, data and setup; prints what to do next").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("universe-fetch", help="download official NSE index lists (NIFTY50/100/200/500, MIDCAP150, ...)")
+    p.add_argument("names", nargs="*", help="e.g. NIFTY500 NIFTY50 (default NIFTY500)")
+    p.set_defaults(fn=cmd_universe_fetch)
     return ap
 
 
@@ -637,6 +1166,9 @@ def main(argv=None) -> int:
         return 2
     except DataError as e:
         print("DATA ERROR:", e, file=sys.stderr)
+        return 2
+    except (KeyError, ValueError) as e:
+        print("ERROR:", e.args[0] if e.args else e, file=sys.stderr)
         return 2
 
 

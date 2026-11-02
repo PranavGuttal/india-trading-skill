@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 LIVE_ACK_PHRASE = "I understand live orders can lose real money"
 
@@ -75,8 +75,19 @@ class Settings(BaseModel):
     max_quote_age_seconds: int = Field(120, ge=1)
     max_bar_age_days: int = Field(5, ge=1)            # for daily-bar research
     slippage_bps: float = Field(10.0, ge=0)
-    # Skip NEW entries when the watchlist's own breadth says RISK_OFF (exits still run).
-    regime_gate: bool = False
+    # Market gate for NEW entries (exits are never gated):
+    #   "index"     no entries while Nifty 50 <= its 200-day average (tested: fewer losses); fails closed
+    #               without fresh Nifty data. Default.
+    #   "watchlist" no entries while the watchlist's own breadth is RISK_OFF (autopilot only, untested)
+    #   "off"       no gate.   (true/false from older settings files mean "index"/"off")
+    regime_gate: Literal["index", "watchlist", "off"] = "index"
+    # Capital floor, % of the allocation. A new trade must keep equity (open positions
+    # valued at their stops) above it even if it hits its own stop; if equity is ever
+    # found below it, the autopilot sells everything and engages the kill switch. 0 = off.
+    capital_floor_pct: float = Field(90.0, ge=0, lt=100)
+    # Signal strategy used by analyze/scan/autopilot/live (see `strategies`).
+    # Default = the least-losing swing strategy in the lab on both universes (docs/STRATEGY_LAB.md).
+    strategy: str = "trend_template"
 
     # Live graduation: minimums can only be raised, never lowered below these floors.
     graduation_min_trades: int = Field(30, ge=30)
@@ -84,9 +95,19 @@ class Settings(BaseModel):
     live_approval_ttl_seconds: int = Field(300, ge=30, le=300)   # an approval expires after this
 
     data_dir: str = "data"
+    indices_dir: str = "data/indices"     # Nifty 50, India VIX, sector indices (data-fetch --indices)
+    etf_dir: str = "data/etf"             # index ETFs (data-fetch --etf)
+    universes_dir: str = "data/universes" # official index lists (universe-fetch NIFTY500)
     state_dir: str = "state"
     watchlist: list[str] = Field(default_factory=lambda: ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ITC"])
     charges: ChargeSchedule = Field(default_factory=ChargeSchedule)
+
+    @field_validator("regime_gate", mode="before")
+    @classmethod
+    def _gate_compat(cls, v):
+        if isinstance(v, bool):
+            return "index" if v else "off"
+        return v
 
     @model_validator(mode="after")
     def _safety(self) -> "Settings":
@@ -99,6 +120,10 @@ class Settings(BaseModel):
         if self.trading_mode == "live" and not self.require_human_approval:
             raise ValueError("live mode requires require_human_approval=true")
         return self
+
+    @property
+    def capital_floor(self) -> float:
+        return round(self.max_experimental_allocation_inr * self.capital_floor_pct / 100, 2)
 
     @property
     def weekly_loss_limit(self) -> float:
@@ -137,6 +162,7 @@ _ENV_MAP = {
     "REQUIRE_HUMAN_APPROVAL": ("require_human_approval", "bool"),
     "INDIA_TRADING_STATE_DIR": ("state_dir", str),
     "INDIA_TRADING_DATA_DIR": ("data_dir", str),
+    "CAPITAL_FLOOR_PCT": ("capital_floor_pct", float),
 }
 
 

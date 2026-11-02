@@ -1,0 +1,9 @@
+# Copy to config/alerts.yaml (your own, git-ignored) and edit. `alerts` checks these
+# on the latest close, or on current prices passed with --prices. Alerts never trade.
+alerts:
+  - {symbol: INFY, above: 1600, note: "breakout level"}
+  - {symbol: TCS, below: 2400}
+  - {symbol: SBIN, change_below_pct: -3}
+  - {symbol: ITC, rsi14_below: 30}
+  - {symbol: KOTAKBANK, new_52w_high: true}
+  - {symbol: HDFCBANK, cross_above: sma200}

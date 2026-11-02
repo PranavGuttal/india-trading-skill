@@ -11,10 +11,10 @@ description: >-
 # india-cost-calculator
 
 ```bash
-python -m india_trading.cli costs 200                       # 1 share at ₹200, delivery
-python -m india_trading.cli costs 50 --qty 4 --stop 48 --target 54
-python -m india_trading.cli costs 1500 --qty 2 --product intraday
-python -m india_trading.cli risk-status                     # limits used by the risk manager
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" costs 200                       # 1 share at ₹200, delivery
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" costs 50 --qty 4 --stop 48 --target 54
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" costs 1500 --qty 2 --product intraday
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" risk-status                     # limits used by the risk manager
 ```
 
 - Charges come from `config/settings.yaml` (copied from groww.in/pricing on
