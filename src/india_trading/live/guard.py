@@ -2,19 +2,26 @@
 
     python -m india_trading.live.guard   (reads the hook JSON on stdin)
 
-Decisions, all fail closed:
+The hook matcher is `mcp__.*`: the guard sees EVERY MCP tool call, so a
+broker connector added under any name is still checked. Decisions, all fail closed:
   * tool listed under `read_only` in config/groww_tools.yaml -> no objection
     (the normal permission prompt still applies)
   * tool listed under `order_tools` -> "ask" ONLY if the live switches are on
     and the call matches one APPROVED, unexpired, unsent ticket in
     state/live.db exactly (symbol, side, qty, limit price); else "deny"
-  * any other Groww tool (not yet classified after inspecting its schema) -> "deny"
-  * any error -> "deny" (and settings.json sets onFailure: block as a backstop)
+  * any other tool whose name contains "groww" -> "deny" (classify it first)
+  * any other MCP tool whose name looks like an order action (place, order,
+    buy, sell, trade, modify, cancel, gtt, square off, exit position) -> "deny",
+    unless it is listed under `allow_other` (e.g. a non-broker tool with
+    "order" in its name)
+  * everything else -> no objection
+  * any error -> "deny" (and the hook config sets onFailure: block as a backstop)
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +31,8 @@ import yaml
 from ..paths import config_file
 
 TOOLS_FILE = Path("config") / "groww_tools.yaml"   # project copy; falls back to the plugin's (see paths.py)
+ORDER_LIKE = re.compile(r"(place|order|buy|sell|trade|modify|cancel|gtt|square|exit_?position|smart_?order|basket)",
+                        re.IGNORECASE)
 
 
 def _out(decision: str | None, reason: str = "") -> dict:
@@ -37,7 +46,13 @@ def load_tools(path: Path | None = None) -> dict:
     path = Path(path) if path is not None else config_file("groww_tools.yaml")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
     raw = raw or {}
-    return {"read_only": set(raw.get("read_only") or []), "order_tools": dict(raw.get("order_tools") or {})}
+    return {"read_only": set(raw.get("read_only") or []), "order_tools": dict(raw.get("order_tools") or {}),
+            "allow_other": set(raw.get("allow_other") or [])}
+
+
+def _action_name(tool_name: str) -> str:
+    """mcp__<server>__<tool> -> <tool> (the part that says what it does)."""
+    return tool_name.split("__")[-1] if tool_name.startswith("mcp__") else tool_name
 
 
 def _field(inp: dict, path: str):
@@ -51,14 +66,20 @@ def _field(inp: dict, path: str):
 
 def decide(event: dict, settings, tools: dict, ledger, now: datetime) -> dict:
     name = str(event.get("tool_name", ""))
-    if "groww" not in name.lower():
+    if not name.startswith("mcp__"):
         return _out(None)
-    if name in tools["read_only"]:
+    if name in tools["read_only"] or name in tools.get("allow_other", set()):
         return _out(None)
     spec = tools["order_tools"].get(name)
     if spec is None:
-        return _out("deny", f"{name} is not classified in config/groww_tools.yaml. List the Groww tools, read this "
-                            "tool's schema, and classify it as read_only or order_tools first.")
+        if "groww" in name.lower():
+            return _out("deny", f"{name} is not classified in config/groww_tools.yaml. List the Groww tools, read "
+                                "this tool's schema, and classify it as read_only or order_tools first.")
+        if ORDER_LIKE.search(_action_name(name)):
+            return _out("deny", f"{name} looks like an order action from a connector that is not classified in "
+                                "config/groww_tools.yaml. If it is a broker tool, classify it; if it is harmless "
+                                "(not a broker), list it under allow_other.")
+        return _out(None)
     if not settings.live_requested:
         return _out("deny", "live trading is locked (live switches off). Paper only.")
     inp = event.get("tool_input") or {}

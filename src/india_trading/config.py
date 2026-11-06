@@ -2,8 +2,10 @@
 
 Precedence: built-in defaults < YAML file < environment variables.
 Live trading needs THREE independent switches (mode, flag, and a local
-acknowledgement phrase) and is still blocked by the execution layer unless a
-verified live broker adapter exists. In this release none does.
+acknowledgement phrase), plus graduation, the risk manager and a per-order
+yes (see live/desk.py). Python never sends a real order itself: Claude sends
+an approved ticket through the Groww connector under the guard hook, or the
+user places it in the Groww app.
 """
 from __future__ import annotations
 
@@ -51,8 +53,12 @@ class Settings(BaseModel):
     live_trading_enabled: bool = False
     live_ack: str = ""
 
+    # The budget: the ONE amount to change when you want to invest more or less
+    # (`budget set 5000`). ₹200 is only the starting default. Every money limit
+    # below is a % of it unless you give an explicit ₹ amount, so they all scale.
     max_experimental_allocation_inr: float = Field(200.0, gt=0)
-    max_single_order_value_inr: float = Field(200.0, gt=0)
+    max_single_order_pct: float = Field(100.0, gt=0, le=100)
+    max_single_order_value_inr: Optional[float] = Field(None, gt=0)    # blank = max_single_order_pct of budget
     max_open_positions: int = Field(1, ge=1)
     allow_short_selling: bool = False
     allow_derivatives: bool = False
@@ -60,8 +66,10 @@ class Settings(BaseModel):
     require_human_approval: bool = True
 
     product: Literal["delivery", "intraday"] = "delivery"
-    max_risk_per_trade_inr: float = Field(10.0, gt=0)
-    daily_loss_limit_inr: float = Field(20.0, gt=0)
+    risk_per_trade_pct: float = Field(1.0, gt=0, le=10)      # loss at stop incl. charges, % of budget
+    max_risk_per_trade_inr: Optional[float] = Field(None, gt=0)        # blank = risk_per_trade_pct of budget
+    daily_loss_pct: float = Field(3.0, gt=0, le=100)
+    daily_loss_limit_inr: Optional[float] = Field(None, gt=0)          # blank = daily_loss_pct of budget
     # Circuit breaker: None means 2x / 4x the daily limit.
     weekly_loss_limit_inr: Optional[float] = Field(None, gt=0)
     monthly_loss_limit_inr: Optional[float] = Field(None, gt=0)
@@ -111,6 +119,13 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _safety(self) -> "Settings":
+        budget = self.max_experimental_allocation_inr
+        for field, pct in (("max_single_order_value_inr", self.max_single_order_pct),
+                           ("max_risk_per_trade_inr", self.risk_per_trade_pct),
+                           ("daily_loss_limit_inr", self.daily_loss_pct)):
+            if getattr(self, field) is None:
+                object.__setattr__(self, field, round(budget * pct / 100, 2))
+                self.__pydantic_fields_set__.discard(field)
         if self.allow_short_selling or self.allow_derivatives or self.allow_leverage:
             raise ValueError("short selling, derivatives and leverage are not supported in this release")
         if self.max_single_order_value_inr > self.max_experimental_allocation_inr:
@@ -120,6 +135,19 @@ class Settings(BaseModel):
         if self.trading_mode == "live" and not self.require_human_approval:
             raise ValueError("live mode requires require_human_approval=true")
         return self
+
+    def with_budget(self, budget: float) -> "Settings":
+        """Same settings at another budget: limits given as % re-scale, explicit ₹ limits stay."""
+        keep = {k: getattr(self, k) for k in self.model_fields_set}
+        keep["max_experimental_allocation_inr"] = budget
+        return Settings(**{**keep, "charges": self.charges})
+
+    @property
+    def explicit_limits(self) -> list[str]:
+        """₹ limits set explicitly (they do NOT scale with the budget)."""
+        return [f for f in ("max_single_order_value_inr", "max_risk_per_trade_inr", "daily_loss_limit_inr",
+                            "weekly_loss_limit_inr", "monthly_loss_limit_inr")
+                if f in self.model_fields_set and getattr(self, f) is not None]
 
     @property
     def capital_floor(self) -> float:
@@ -135,8 +163,8 @@ class Settings(BaseModel):
 
     @property
     def live_requested(self) -> bool:
-        """True only when every live switch is set. Execution still refuses
-        without a verified live adapter."""
+        """True only when every live switch is set. Graduation, the risk
+        manager and a per-order approval are still required (live/desk.py)."""
         return (
             self.trading_mode == "live"
             and self.live_trading_enabled
@@ -163,6 +191,10 @@ _ENV_MAP = {
     "INDIA_TRADING_STATE_DIR": ("state_dir", str),
     "INDIA_TRADING_DATA_DIR": ("data_dir", str),
     "CAPITAL_FLOOR_PCT": ("capital_floor_pct", float),
+    "MAX_RISK_PER_TRADE_INR": ("max_risk_per_trade_inr", float),
+    "RISK_PER_TRADE_PCT": ("risk_per_trade_pct", float),
+    "DAILY_LOSS_LIMIT_INR": ("daily_loss_limit_inr", float),
+    "DAILY_LOSS_PCT": ("daily_loss_pct", float),
 }
 
 

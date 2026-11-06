@@ -10,7 +10,7 @@
 #      (e.g. mcp__<server>__<tool>).
 #   3. Put the tool that PLACES an order under order_tools, mapping its input
 #      field names. Never list modify/cancel tools as read_only.
-#   4. Run: python -m india_trading.cli live status   (shows what is classified)
+#   5. Run: python -m india_trading.cli live status   (shows what is classified)
 #
 # read_only:
 #   - mcp__groww__get_holdings            # example shape only, NOT verified
@@ -21,5 +21,8 @@
 #     qty: quantity
 #     price: price                        # limit price; orders without one are denied
 #     side_values: {BUY: BUY, SELL: SELL} # how this tool spells buy/sell
+#   4. If the guard blocks a harmless non-broker tool because its name contains
+#      an order word (e.g. mcp__shop__track_order), list it under allow_other.
 read_only: []
 order_tools: {}
+allow_other: []

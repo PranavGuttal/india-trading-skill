@@ -62,8 +62,8 @@ switch is on, or outside market hours. Claude and the computer must be on.
 
 ## Reporting results honestly
 
-- At the default ₹200 budget expect zero trades: charges exceed the ₹10
-  risk limit. Say this is the risk manager working, not a bug.
+- At a ₹200 budget expect zero trades: charges exceed the 1% risk limit.
+  The user can change the budget (`budget set N`, india-risk-manager). Say this is the risk manager working, not a bug.
 - `--capital` is a larger PAPER budget to study the strategy, never a
   suggestion to trade that amount.
 - Fewer than 30 closed trades = INCONCLUSIVE. `data/sample/` is SYNTHETIC.

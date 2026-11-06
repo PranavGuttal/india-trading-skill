@@ -23,8 +23,8 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" exit-plan --data-dir data/real
 
 - The loss at the stop INCLUDES round-trip charges; that is what the user
   really loses. Quote it, and the break-even price after charges.
-- Without `--risk/--budget` the settings' limits apply (₹10 risk, ₹200
-  order by default) and most plans size to 0 shares: explain that charges
+- Without `--risk/--budget` the settings' limits apply (1% of the budget
+  as risk, the whole budget as max order; see `budget`) and most plans size to 0 shares: explain that charges
   make tiny trades uneconomic rather than suggesting bigger limits.
 - A "planning target" (trend strategies) is used for reward checks only; the
   position exits on its trailing stop / close rule instead.

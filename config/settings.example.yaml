@@ -5,13 +5,19 @@ trading_mode: paper            # paper | live  (live = the locked `live` desk on
 live_trading_enabled: false
 require_human_approval: true
 
-# Experimental budget enforced by THIS application only. It does not limit
-# your Groww account: the rest of your balance stays reachable with the same login.
+# Budget enforced by THIS application only. It does not limit your Groww
+# account: the rest of your balance stays reachable with the same login.
+# Change it any time with `budget set 5000` (or edit here); paper cash and every
+# % limit below follow it. 200 is only the starting value.
 max_experimental_allocation_inr: 200
-max_single_order_value_inr: 200
+max_single_order_pct: 100      # max order = this % of the budget
+risk_per_trade_pct: 1          # loss at stop INCLUDING estimated charges, % of budget
+daily_loss_pct: 3              # new trades halted for the day after losing this % of budget
+# Optional fixed ₹ amounts instead of %. Leave blank so they scale with the budget.
+max_single_order_value_inr:
+max_risk_per_trade_inr:
+daily_loss_limit_inr:
 max_open_positions: 1
-max_risk_per_trade_inr: 10     # loss at stop INCLUDING estimated charges
-daily_loss_limit_inr: 20
 # Circuit breaker (stricter only). Blank weekly/monthly = 2x / 4x the daily limit.
 weekly_loss_limit_inr:
 monthly_loss_limit_inr:

@@ -37,7 +37,7 @@ use india-strategy-lab; for a chart read use india-technical-analyst.
 - The single-stock backtest applies the same risk manager as paper trading,
   including the capital floor and circuit breaker, so trading may stop
   after losses: report that as protection working.
-- At the default ₹200 budget almost every trade is blocked by charges.
+- At a ₹200 budget almost every trade is blocked by charges.
   Explain this rather than loosening limits. `--capital` is a study budget,
   not a suggestion to trade that amount.
 - This is research, not investment advice.

@@ -41,7 +41,7 @@ packages into the plugin's own `.venv`, then run `doctor` and do what it lists.
 | Dividends, splits, results | india-corporate-actions | `actions` |
 | News, SEBI circulars, results, FII/DII flows, scenarios | india-news-research | agents |
 | Price / setup alerts | india-alerts | `alerts` |
-| Why blocked, kill switch, capital floor | india-risk-manager | `risk-status`, `kill-switch` |
+| Why blocked, kill switch, capital floor, invest more or less | india-risk-manager | `risk-status`, `kill-switch`, `budget`, `budget set N` |
 | One paper trade with approval | india-paper-trading | `paper start/close/status` |
 | Trade on its own (paper), replay | india-autopilot | `autopilot`, `replay` |
 | Monthly ETF / basket / rotation (paper) | india-allocation | `allocate` |

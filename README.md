@@ -9,8 +9,11 @@ and 6 read-only agents, all on top of a tested Python toolkit:
   tested market gate.
 - **Trading:** paper trading (by hand, on autopilot, or monthly allocation),
   plus a real-money desk that stays **locked** until the paper account passes
-  a graduation test. Every live order needs your explicit yes and passes a
-  guard hook inside Claude Code.
+  a graduation test. Every live order needs your explicit yes. Claude may send
+  it only from Claude Code, through a guard hook that checks every MCP tool
+  call; otherwise you place it yourself in the Groww app. Real-money steps are
+  supported in **Claude Code only**: in the Claude desktop/web app there is no
+  hook and no persistent paper account (docs/GROWW_INTEGRATION.md).
 
 > **Read this first.** On 10 years of real NSE data, **no strategy in this
 > toolkit beat simply buying and holding after Groww's charges**. The
@@ -84,6 +87,11 @@ The full map is in `skills/india-trading-navigator/SKILL.md`.
    match an approved ticket.
 
 ## The money reality
+- **Your budget is yours to change.** ₹200 is only the starting value:
+  `budget set 5000` raises or lowers it, moves the paper cash by the
+  difference, and every limit follows (max order 100%, risk per trade 1%,
+  daily loss 3%, capital floor 90% of the budget). `budget` shows the limits
+  next to your paper results.
 - **₹200:** a delivery round trip costs about ₹36 (18%), so every ₹200 trade
   is blocked. That is the risk manager doing its job (`costs 200`).
 - **Below about ₹25,000:** only a single index ETF is economical. A 20-stock

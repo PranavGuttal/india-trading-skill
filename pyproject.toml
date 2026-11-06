@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "india-trading-skill"
-version = "0.4.0"
+version = "0.4.2"
 description = "Research, risk-control and paper-trading toolkit for NSE cash equities, with Claude skills. Paper trading only by default."
 readme = "README.md"
 license = { text = "MIT" }

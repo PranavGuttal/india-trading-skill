@@ -25,7 +25,7 @@ from ..market_data.calendar import IST, NSECalendar
 from ..models import OrderIntent, Quote, Side
 from ..risk.manager import KillSwitch, RiskManager
 from ..workflows.supervisor import Step, Supervisor
-from .graduation import Graduation, check as check_graduation
+from .graduation import Graduation, check as check_graduation, verify_entry_prices
 from .ledger import LiveLedger
 
 
@@ -41,8 +41,13 @@ class DeskResult:
 def graduation_for(settings: Settings, journal: Journal) -> Graduation:
     paper = PaperBroker(settings.state_path("paper.db"), settings.max_experimental_allocation_inr, settings.charges)
     with paper._conn() as c:
-        buys = [r[0] for r in c.execute("SELECT intent_id FROM orders WHERE side='BUY' AND filled_qty > 0")]
-    return check_graduation(settings, paper.closed_trades(), buys, journal.events(mode="paper", limit=1_000_000))
+        rows = c.execute("SELECT intent_id, symbol, trade_date, avg_fill_price FROM orders "
+                         "WHERE side='BUY' AND filled_qty > 0").fetchall()
+    buys = [r[0] for r in rows]
+    problems = verify_entry_prices([{"symbol": r[1], "trade_date": r[2], "price": r[3]} for r in rows],
+                                   settings.data_dir)
+    return check_graduation(settings, paper.closed_trades(), buys, journal.events(mode="paper", limit=1_000_000),
+                            price_problems=problems)
 
 
 def _locks(settings: Settings) -> list[str]:

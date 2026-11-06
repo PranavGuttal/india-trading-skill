@@ -37,4 +37,4 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" paper close SYMBOL --price 420 -
 
 There is no live order path in this release. If the user wants to act on a
 ticket in real life, they place it themselves in the Groww app. Remind them
-the ticket's numbers are estimates and the ₹200 limit is not enforced by Groww.
+the ticket's numbers are estimates and the budget limit is not enforced by Groww.

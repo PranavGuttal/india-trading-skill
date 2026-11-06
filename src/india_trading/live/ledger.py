@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   product TEXT, trade_date TEXT, kind TEXT, status TEXT, created_at TEXT, approved_at TEXT, sent_at TEXT,
   reply TEXT, broker_order_id TEXT, filled_qty INTEGER DEFAULT 0, avg_price REAL, note TEXT);
 """
-OPEN_STATES = ("PREPARED", "APPROVED", "SENT", "UNKNOWN")
+OPEN_STATES = ("PREPARED", "APPROVED", "APPROVED_APP", "SENT", "UNKNOWN")
+SEND_VIA = ("claude", "app")   # claude: Claude sends via the Groww tool (guard-checked); app: the user places it
 
 
 class LedgerError(RuntimeError):
@@ -68,7 +69,12 @@ class LiveLedger:
         with self._conn() as c:
             return [dict(r) for r in c.execute("SELECT * FROM tickets ORDER BY created_at DESC LIMIT ?", (limit,))]
 
-    def approve(self, intent_id: str, reply: str, now: datetime) -> dict:
+    def approve(self, intent_id: str, reply: str, now: datetime, via: str = "claude") -> dict:
+        """via='claude': the guard hook may let ONE matching Groww order call through.
+        via='app': the user places the order in the Groww app; the guard never lets
+        Claude send it, and `record` takes the result."""
+        if via not in SEND_VIA:
+            raise LedgerError(f"send-via must be one of {SEND_VIA}")
         t = self.get(intent_id)
         if t is None:
             raise LedgerError(f"no live ticket {intent_id}")
@@ -77,8 +83,8 @@ class LiveLedger:
         if not Approval(intent_id, reply).is_explicit_yes():
             raise LedgerError("approval must be an explicit 'yes' for this one order")
         with self._conn() as c:
-            c.execute("UPDATE tickets SET status='APPROVED', approved_at=?, reply=? WHERE intent_id=? AND status='PREPARED'",
-                      (now.isoformat(), reply[:60], intent_id))
+            c.execute("UPDATE tickets SET status=?, approved_at=?, reply=? WHERE intent_id=? AND status='PREPARED'",
+                      ("APPROVED" if via == "claude" else "APPROVED_APP", now.isoformat(), reply[:60], intent_id))
         return self.get(intent_id)  # type: ignore[return-value]
 
     def consume(self, symbol: str, side: str, qty: int, price: Optional[float], now: datetime,
@@ -104,8 +110,9 @@ class LiveLedger:
     def record(self, intent_id: str, status: str, broker_order_id: Optional[str], filled_qty: int,
                avg_price: Optional[float], note: str = "") -> dict:
         t = self.get(intent_id)
-        if t is None or t["status"] not in ("SENT", "UNKNOWN", "PARTIALLY_FILLED"):
-            raise LedgerError("only a SENT/UNKNOWN/PARTIALLY_FILLED ticket can be updated with a broker result")
+        if t is None or t["status"] not in ("SENT", "APPROVED_APP", "UNKNOWN", "PARTIALLY_FILLED"):
+            raise LedgerError("only a SENT, APPROVED_APP (placed by you in the Groww app), UNKNOWN or "
+                              "PARTIALLY_FILLED ticket can be updated with a broker result")
         if status not in ("FILLED", "PARTIALLY_FILLED", "REJECTED", "CANCELLED", "UNKNOWN"):
             raise LedgerError(f"bad status {status}")
         if filled_qty < 0 or filled_qty > t["qty"]:

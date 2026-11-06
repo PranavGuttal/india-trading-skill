@@ -42,7 +42,7 @@ COMMANDS = [
     ["backtest", "AAA", "--strategy", "trend_template", "--capital", "20000", "--risk", "200"],
     ["lab", "--strategies", "donchian_trend,etf_trend", "--capital", "50000"],
     ["autopilot", "--strategy", "donchian_trend"], ["costs", "500", "--qty", "10"], ["risk-status"], ["review"],
-    ["daily", "--paper", "--out", "reports"], ["live", "status"],
+    ["daily", "--paper", "--out", "reports"], ["live", "status"], ["budget"],
 ]
 
 

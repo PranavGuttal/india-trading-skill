@@ -47,7 +47,8 @@ def test_negative_value_rejected():
 
 def test_position_size_respects_risk_order_and_budget(settings):
     rm = RiskManager(settings)
-    # risk ₹10 / ₹1 per share = 10 ; order cap 200/50 = 4 ; budget 4
-    assert rm.size_position(50, 49) == 4
+    # risk 1% of ₹200 = ₹2 / ₹1 per share = 2 ; order cap 200/50 = 4 ; budget 4
+    assert rm.size_position(50, 49) == 2
+    assert rm.size_position(50, 49.9) == 4     # ₹0.10 risk per share: order cap / budget bind
     assert rm.size_position(50, 52) == 0       # stop above entry
     assert rm.size_position(500, 490) == 0     # cannot afford one share

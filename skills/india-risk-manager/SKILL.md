@@ -17,6 +17,8 @@ A BLOCK is final for that order.
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" risk-status
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" budget
+python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" budget set 5000
 python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" kill-switch on --reason "stepping away"
 python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" kill-switch off
 python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" status
@@ -32,6 +34,16 @@ budget/order cap/risk after charges · reward:risk < 1.5 · reward < 2×
 round-trip charges · risk over the remaining loss allowance · **capital
 floor** · **market gate** (Nifty 50 below its 200-day average, or its data
 missing/stale) · duplicate intent.
+
+## Budget (`budget`, `budget set N`)
+
+The budget is the user's choice and is not fixed at ₹200. Every limit is a %
+of it (max order 100%, risk per trade 1%, daily loss 3%, floor 90%), so
+`budget set N` re-scales all of them and moves paper cash by the difference.
+Run `budget set` only when the user asks for a new amount, and confirm the
+amount first. Never suggest a bigger budget to get a blocked trade through;
+when asked whether to change it, show `budget` and `review` and point to the
+evidence bar (30+ closed trades, positive after charges).
 
 ## Capital floor (`capital_floor_pct`, default 90)
 

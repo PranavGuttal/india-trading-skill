@@ -9,7 +9,7 @@
       "name": "india-trading-skill",
       "source": "./",
       "description": "NSE research (regime, sectors, screener, strategy lab), risk control with a capital floor, and PAPER trading with Groww charges; real-money desk locked behind graduation and a guard hook.",
-      "version": "0.4.0"
+      "version": "0.4.2"
     }
   ]
 }

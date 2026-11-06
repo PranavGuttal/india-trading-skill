@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__.*[Gg][Rr][Oo][Ww][Ww].*",
+        "matcher": "mcp__.*",
         "hooks": [
           {
             "type": "command",
@@ -10,7 +10,7 @@
             "shell": "bash",
             "timeout": 20,
             "onFailure": "block",
-            "statusMessage": "Live guard: checking Groww tool call"
+            "statusMessage": "Live guard: checking MCP tool call"
           }
         ]
       }

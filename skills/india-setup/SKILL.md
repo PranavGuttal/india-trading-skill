@@ -26,6 +26,7 @@ and tzdata there; later commands find it on their own. Ask before running it
 1. **Settings** — optional. Copy `${CLAUDE_PLUGIN_ROOT}/config/settings.example.yaml`
    to `config/settings.yaml` in the project only if the user wants to change
    limits. Without it, safe defaults apply (paper, ₹200 budget, 90% floor).
+   To invest more or less, use `budget set N`; the limits scale with it.
 2. **Data** — `data-fetch --universe large_caps_20 --indices --etf` (internet;
    see india-data-manager). Then set `data_dir: data/real` and the watchlist.
 3. **Holidays** — ask the user to open nseindia.com → Resources → Exchange

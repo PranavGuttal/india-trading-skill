@@ -60,10 +60,25 @@ class PaperBroker(BrokerAdapter):
         self.fill_model: FillModel = fill_model
         self.clock = clock
         self.fail_next_submit_with_timeout = False  # test hook
+        self.budget_change: Optional[tuple[float, float]] = None   # (old, new) when the budget moved
+        start = round(float(starting_cash), 2)
         with self._conn() as c:
             c.executescript(SCHEMA)
-            if c.execute("SELECT COUNT(*) FROM account").fetchone()[0] == 0:
-                c.execute("INSERT INTO account (id, cash) VALUES (1, ?)", (float(starting_cash),))
+            if "funded" not in {r["name"] for r in c.execute("PRAGMA table_info(account)")}:
+                c.execute("ALTER TABLE account ADD COLUMN funded REAL")
+            row = c.execute("SELECT cash, funded FROM account WHERE id=1").fetchone()
+            if row is None:
+                c.execute("INSERT INTO account (id, cash, funded) VALUES (1, ?, ?)", (start, start))
+            elif row["funded"] is None:                 # database from before budgets could change
+                c.execute("UPDATE account SET funded=? WHERE id=1", (start,))
+            elif abs(row["funded"] - start) >= 0.01:
+                # The budget was raised or lowered: add or take out the difference, like a deposit/withdrawal.
+                cash = row["cash"] + start - row["funded"]
+                if cash < 0:
+                    raise ValueError(f"cannot lower the paper budget to ₹{start:,.2f}: ₹{row['funded'] - row['cash']:,.2f} "
+                                     f"is in open positions or lost. Close positions first or choose a larger budget.")
+                c.execute("UPDATE account SET cash=?, funded=? WHERE id=1", (round(cash, 2), start))
+                self.budget_change = (float(row["funded"]), start)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -92,6 +107,11 @@ class PaperBroker(BrokerAdapter):
     def cash(self) -> float:
         with self._conn() as c:
             return float(c.execute("SELECT cash FROM account WHERE id=1").fetchone()[0])
+
+    def funded(self) -> float:
+        """Total money put in (the current budget)."""
+        with self._conn() as c:
+            return float(c.execute("SELECT funded FROM account WHERE id=1").fetchone()[0])
 
     def get_positions(self) -> list[Position]:
         with self._conn() as c:

@@ -9,12 +9,12 @@ blocked (fail closed).
 |---|---|
 | TRADING_MODE | paper |
 | LIVE_TRADING_ENABLED | false |
-| MAX_EXPERIMENTAL_ALLOCATION_INR | 200 |
-| MAX_SINGLE_ORDER_VALUE_INR | 200 |
+| MAX_EXPERIMENTAL_ALLOCATION_INR (the budget) | 200 to start; change with `budget set N` |
+| max_single_order_pct | 100% of the budget |
 | MAX_OPEN_POSITIONS | 1 |
-| max_risk_per_trade_inr (incl. charges) | 10 |
-| daily_loss_limit_inr | 20 |
-| weekly / monthly loss limit | 2× / 4× daily (₹40 / ₹80) unless set |
+| risk_per_trade_pct (loss at stop incl. charges) | 1% of the budget |
+| daily_loss_pct | 3% of the budget |
+| weekly / monthly loss limit | 2× / 4× daily unless set |
 | max_consecutive_losses → loss_cooldown_days | 3 → 2 business days |
 | regime_gate (market gate) | index: no new entries while Nifty 50 ≤ its 200-day average or its data is missing/stale |
 | capital_floor_pct | 90 (% of the budget that must survive; 0 = off) |
@@ -25,6 +25,23 @@ blocked (fail closed).
 | ALLOW_SHORT_SELLING / DERIVATIVES / LEVERAGE | false (true is rejected at load) |
 | REQUIRE_HUMAN_APPROVAL | true (cannot be false in live mode) |
 
+## The budget scales everything
+The budget is one number (`max_experimental_allocation_inr`). Every money
+limit is a percentage of it, so investing more or less is one command:
+
+```
+python scripts/india.py budget              # limits + paper results
+python scripts/india.py budget set 5000     # max order ₹5,000, risk ₹50/trade, daily ₹150, floor ₹4,500
+```
+
+`budget set` saves the amount in `config/settings.yaml` and adds or removes
+the difference in paper cash, like a deposit or withdrawal. It refuses to
+cut the budget below money already in open positions or lost. A fixed ₹
+amount (`max_risk_per_trade_inr`, `max_single_order_value_inr`,
+`daily_loss_limit_inr`) overrides its percentage and does NOT scale; leave
+those blank unless you want that. Base changes on 30+ closed trades and net
+results after charges (`review`), not on a few wins or losses.
+
 ## What ₹200 means in practice
 The ₹200 is an **application-level** budget. Groww does not isolate it: the
 same login can reach everything else in the account, and nothing in Groww
@@ -34,7 +51,7 @@ With Groww's published schedule (copied 2026-10-30), a ₹200 delivery round
 trip costs about ₹36 (₹35.85 by `risk/costs.py`): ₹5 minimum brokerage each
 side, the DP charge on the sell, plus 18% GST. That is ~18% of the position.
 Intraday avoids the DP charge but still costs about ₹12 (~6%). Because the per-trade risk limit
-(₹10) **includes** charges, the risk manager blocks every ₹200 delivery trade
+(1% = ₹2 at ₹200) **includes** charges, the risk manager blocks every ₹200 delivery trade
 the strategy proposes. On the synthetic sample data, 100% of signals were
 blocked at ₹200 (see BACKTESTING.md). This is intended: those trades lose
 money to charges before price moves.
@@ -85,12 +102,26 @@ slippage, partial fills, broker outages, charge changes, and manual actions
 outside this app can all produce worse outcomes.
 
 ## Live (real money)
-Locked by default. Unlock requires all live switches, graduation (≥30 closed
-forward-paper trades on ≥20 distinct days, positive after charges, real data
-and live-read prices only; floors cannot be lowered in settings), the
-RiskManager with cash read from Groww, an explicit per-order yes (5-minute
-expiry), and the guard hook match. The live budget is the same
-`max_experimental_allocation_inr` (₹200 by default). See GROWW_INTEGRATION.md.
+Locked by default. Unlocking requires all of:
+- every live switch;
+- graduation: at least 30 closed forward-paper trades on at least 20 distinct
+  days, positive after charges, real data and live-read prices only. Each
+  typed price must fall inside that day's real NSE low–high range (±0.5%),
+  and the floors cannot be lowered in settings;
+- the RiskManager, with cash read from Groww;
+- an explicit per-order yes.
+
+Then the order goes one of two ways:
+- **Claude sends it:** only in Claude Code with the guard hook, within
+  5 minutes, and only if the call exactly matches the ticket.
+- **You place it in the Groww app** (`--send-via app`).
+
+The live budget is the same `max_experimental_allocation_inr` (your budget;
+₹200 until you change it). There is no unattended live trading. See GROWW_INTEGRATION.md.
+
+What the price check does NOT catch: a price that was inside the day's range
+but not the price at the moment you decided. The journal timestamps help you
+audit that; it is on you to type what you actually saw.
 
 ## Kill switch
 `python scripts/india.py kill-switch on` creates `state/KILL_SWITCH`.

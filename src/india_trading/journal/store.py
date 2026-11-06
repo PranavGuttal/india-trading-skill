@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS notes (
 KINDS = {
     "SIGNAL", "NO_TRADE", "RISK_APPROVED", "RISK_BLOCKED", "APPROVAL_REQUESTED",
     "APPROVED", "DECLINED", "ORDER_SUBMITTED", "ORDER_STATUS", "FILL", "EXIT",
-    "ERROR", "RECOVERY", "KILL_SWITCH", "TICKET", "ALLOCATION",
+    "ERROR", "RECOVERY", "KILL_SWITCH", "TICKET", "ALLOCATION", "BUDGET",
 }
 
 _SECRET_KEYS = re.compile(r"(token|secret|password|passwd|pin|otp|api[_-]?key|totp|auth|account[_-]?(id|no|number))", re.I)

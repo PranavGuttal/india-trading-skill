@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -19,6 +21,7 @@ from .brokers.paper_broker import PaperBroker
 from .config import ConfigError, Settings, load_settings
 from .journal.review import format_review, review
 from .live.desk import LiveDesk, graduation_for
+from .live.runtime import check as runtime_check
 from .live.graduation import format_graduation
 from .live.guard import load_tools
 from .live.ledger import LedgerError
@@ -81,7 +84,7 @@ def _study(s: Settings, args) -> Settings:
     """--capital: a larger PAPER budget to study the strategy. Never a suggestion to trade that amount."""
     if not getattr(args, "capital", None):
         return s
-    risk = args.risk or args.capital * 0.01
+    risk = args.risk or args.capital * s.risk_per_trade_pct / 100
     return s.model_copy(update={
         "max_experimental_allocation_inr": args.capital, "max_single_order_value_inr": args.capital,
         "max_risk_per_trade_inr": risk, "daily_loss_limit_inr": min(args.capital, risk * 3),
@@ -285,6 +288,83 @@ def cmd_risk_status(args):
     }, indent=2))
 
 
+def _set_yaml_key(path: Path, key: str, value) -> None:
+    """Set one top-level key in a YAML file, keeping every other line and comment."""
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    pat = re.compile(rf"^{re.escape(key)}:[ \t]*[^\s#]*", re.M)
+    if pat.search(text):
+        text = pat.sub(f"{key}: {value}", text, count=1)
+    else:
+        text = text + ("" if not text or text.endswith("\n") else "\n") + f"{key}: {value}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _limits_lines(s: Settings) -> list[str]:
+    fixed = set(s.explicit_limits)
+
+    def how(field, pct):
+        return "fixed ₹, does NOT scale with the budget" if field in fixed else f"{pct:g}% of budget"
+
+    return [
+        f"  budget             ₹{s.max_experimental_allocation_inr:,.2f}",
+        f"  max order          ₹{s.max_single_order_value_inr:,.2f}  ({how('max_single_order_value_inr', s.max_single_order_pct)})",
+        f"  risk per trade     ₹{s.max_risk_per_trade_inr:,.2f}  ({how('max_risk_per_trade_inr', s.risk_per_trade_pct)}, charges incl.)",
+        f"  daily loss limit   ₹{s.daily_loss_limit_inr:,.2f}  ({how('daily_loss_limit_inr', s.daily_loss_pct)})",
+        f"  weekly / monthly   ₹{s.weekly_loss_limit:,.2f} / ₹{s.monthly_loss_limit:,.2f}",
+        f"  capital floor      ₹{s.capital_floor:,.2f}  ({s.capital_floor_pct:g}% of budget must survive)",
+    ]
+
+
+def cmd_budget(args):
+    """Show the budget, its limits and paper performance; `budget set N` changes it."""
+    s, _, journal = _ctx(args)
+    if args.action == "set":
+        if args.amount is None or args.amount <= 0:
+            print("Give the new budget in rupees, e.g. `budget set 5000`.")
+            return 2
+        if "MAX_EXPERIMENTAL_ALLOCATION_INR" in os.environ:
+            print("MAX_EXPERIMENTAL_ALLOCATION_INR is set in the environment and overrides the settings file; "
+                  "change or remove it there instead.")
+            return 2
+        old = s.max_experimental_allocation_inr
+        try:
+            new = s.with_budget(args.amount)
+        except Exception as e:                 # invalid combination, e.g. a fixed ₹ limit above the new budget
+            raise ValueError(f"budget ₹{args.amount:,.2f} rejected: {e}") from e
+        _broker(new)                           # moves paper cash by the difference; refuses if it cannot
+        alloc_db = Path(s.state_dir) / "allocation" / "paper.db"
+        if alloc_db.exists():
+            PaperBroker(alloc_db, new.max_experimental_allocation_inr, new.charges)
+        _set_yaml_key(Path(args.config), "max_experimental_allocation_inr", f"{args.amount:g}")
+        journal.record("BUDGET", "paper", f"budget ₹{old:,.2f} -> ₹{args.amount:,.2f}",
+                       payload={"old": old, "new": args.amount})
+        print(f"Budget changed ₹{old:,.2f} → ₹{args.amount:,.2f} (saved in {args.config}). "
+              f"Paper cash moved by the difference.")
+        s = new
+    print(PAPER_BANNER)
+    print("Budget and limits:")
+    print("\n".join(_limits_lines(s)))
+    if s.explicit_limits:
+        print(f"  NOTE: {', '.join(s.explicit_limits)} set as fixed ₹ in settings; "
+              f"blank them to let them follow the budget.")
+    b = _broker(s)
+    trades = b.closed_trades()
+    deployed = sum(p.qty * p.avg_price for p in b.get_positions())
+    net = sum(t["pnl_net"] for t in trades)
+    wins = sum(1 for t in trades if t["pnl_net"] > 0)
+    print("Paper performance:")
+    print(f"  funded ₹{b.funded():,.2f} | cash ₹{b.cash():,.2f} | in positions ₹{deployed:,.2f} (at cost)")
+    if trades:
+        print(f"  {len(trades)} closed trades | net ₹{net:,.2f} after charges ({net / b.funded():+.2%} of budget) | "
+              f"won {wins}/{len(trades)}")
+    else:
+        print("  no closed trades yet")
+    print("Change the budget on evidence: 30+ closed trades and positive net after charges (`review`), "
+          "not a few wins or losses. Every limit above re-scales with it.")
+    return 0
+
+
 def cmd_kill(args):
     s, _, journal = _ctx(args)
     k = KillSwitch(s.state_path("KILL_SWITCH"))
@@ -466,6 +546,11 @@ def cmd_live(args):
                           "groww_read_only_tools": sorted(tools["read_only"]),
                           "groww_order_tools": sorted(tools["order_tools"]),
                           "ledger_positions": desk.ledger.positions()}, indent=2, default=str))
+        rt = runtime_check()
+        print(("CLAUDE SEND PATH: AVAILABLE (Claude Code + guard hook: " + rt.hook_source + ")") if rt.ok else
+              "CLAUDE SEND PATH: UNAVAILABLE — approve with --send-via app and place orders yourself in Groww")
+        for why in rt.problems:
+            print("  -", why)
         print(format_graduation(graduation_for(s, journal)))
         return 0
     if args.lcmd == "tickets":
@@ -485,7 +570,8 @@ def cmd_live(args):
             print("  -", why)
         if r.ok:
             print("NEXT: show this ticket to the user. Only if they reply an explicit yes for THIS order run "
-                  f"`live approve {r.ticket['intent_id']}`; the approval expires in {s.live_approval_ttl_seconds}s.")
+                  f"`live approve {r.ticket['intent_id']} --reply \"<their words>\" --send-via claude|app`. "
+                  f"A Claude send must happen within {s.live_approval_ttl_seconds}s.")
         return 0 if r.ok else 1
     try:
         if args.lcmd == "approve":
@@ -495,10 +581,25 @@ def cmd_live(args):
                     reply = input("Type 'yes' to approve this REAL-MONEY order (anything else declines): ").strip()
                 except EOFError:
                     reply = ""
-            t = desk.ledger.approve(args.intent_id, reply, datetime.now(IST))
-            journal.record("APPROVED", "live", f"reply: {reply[:60]}", symbol=t["symbol"], intent_id=t["intent_id"])
-            print(f"APPROVED {t['side']} {t['qty']} {t['symbol']} @ ₹{t['limit_price']} until "
-                  f"+{s.live_approval_ttl_seconds}s. Send exactly this order through the Groww order tool.")
+            if args.send_via == "claude":
+                rt = runtime_check()
+                if not rt.ok:
+                    print("REFUSED: Claude cannot send this order safely from here:")
+                    for why in rt.problems:
+                        print("  -", why)
+                    print("Approve with --send-via app and place it yourself in the Groww app instead.")
+                    return 2
+            t = desk.ledger.approve(args.intent_id, reply, datetime.now(IST), via=args.send_via)
+            journal.record("APPROVED", "live", f"reply: {reply[:60]} (send via {args.send_via})",
+                           symbol=t["symbol"], intent_id=t["intent_id"])
+            head = f"APPROVED {t['side']} {t['qty']} {t['symbol']} @ ₹{t['limit_price']} LIMIT"
+            if args.send_via == "claude":
+                print(f"{head} for {s.live_approval_ttl_seconds}s. Send exactly this order through the Groww "
+                      "order tool; the guard hook will ask the user to confirm it.")
+            else:
+                print(f"{head}. YOU place exactly this order in the Groww app now (LIMIT, not market). The guard "
+                      f"will not let Claude send it. Then: live record {t['intent_id']} --status ... "
+                      "--order-id ... --filled-qty ... --avg-price ...")
             return 0
         if args.lcmd == "record":
             t = desk.ledger.record(args.intent_id, args.status.upper(), args.order_id, args.filled_qty, args.avg_price,
@@ -1023,6 +1124,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=["paper", "live", "backtest"]); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--export", help="CSV path"); p.set_defaults(fn=cmd_journal)
     sub.add_parser("risk-status", help="limits and today's usage").set_defaults(fn=cmd_risk_status)
+    p = sub.add_parser("budget", help="show the budget, the limits that scale with it and paper performance; "
+                                      "`budget set N` invests more or less")
+    p.add_argument("action", nargs="?", choices=["show", "set"], default="show")
+    p.add_argument("amount", nargs="?", type=float, help="new budget in ₹ (with `set`)")
+    p.set_defaults(fn=cmd_budget)
     p = sub.add_parser("kill-switch", help="block all new orders (on) or allow them again (off)")
     p.add_argument("state", choices=["on", "off"]); p.add_argument("--reason"); p.set_defaults(fn=cmd_kill)
     p = sub.add_parser("monitor", help="read-only polling monitor")
@@ -1084,8 +1190,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
     q = lsub.add_parser("approve", help="explicit per-order yes for one PREPARED ticket")
     q.add_argument("intent_id"); q.add_argument("--reply", help="only the user's own words for THIS ticket")
+    q.add_argument("--send-via", required=True, choices=["claude", "app"],
+                   help="claude: Claude sends it via the Groww tool (Claude Code + guard hook only); "
+                        "app: you place it yourself in the Groww app")
     q.add_argument("--data-dir"); q.set_defaults(fn=cmd_live)
-    q = lsub.add_parser("record", help="record the Groww result of a SENT ticket")
+    q = lsub.add_parser("record", help="record the Groww result of a SENT or app-placed ticket")
     q.add_argument("intent_id"); q.add_argument("--status", required=True,
                                                 choices=["FILLED", "PARTIALLY_FILLED", "REJECTED", "CANCELLED", "UNKNOWN"])
     q.add_argument("--order-id"); q.add_argument("--filled-qty", type=int, default=0)

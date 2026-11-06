@@ -46,7 +46,7 @@ while the process or computer is off.
 - Reset paper trading: stop everything, delete `state/paper.db`.
 
 ## Security checklist
-- [x] No credentials read or stored by this release; `.env` and `state/` git-ignored.
+- [x] No credentials read or stored; settings live in `config/settings.yaml` (git-ignored, as is `state/`).
 - [x] Journal payloads redact keys like token/secret/password/pin/otp/api_key/account id.
 - [x] JSON log formatter redacts `token=…`, bearer tokens and JWT-looking strings.
 - [x] Live adapter refuses all calls; executor refuses live without 3 switches + per-order yes.

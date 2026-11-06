@@ -20,7 +20,8 @@ Checks (cite file and value for each finding):
    PASSED — otherwise that is a HIGH finding. `require_human_approval` true, no short
    selling / derivatives / leverage. No tokens, passwords, PINs, OTPs or
    TOTP secrets anywhere in the repo (grep config/, state/ names, *.yaml, *.md).
-2. Limits: max_single_order_value_inr ≤ max_experimental_allocation_inr;
+2. Limits (`budget` prints them): max order ≤ budget; risk per trade ≤ 2% of
+   the budget is sensible, flag any fixed ₹ limit that no longer fits the budget;
    daily ≤ weekly ≤ monthly loss limits are sensible.
 3. Journal (`python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" journal --limit 500`,
    `python "${CLAUDE_PLUGIN_ROOT}/scripts/india.py" review`): every ORDER_SUBMITTED has an
