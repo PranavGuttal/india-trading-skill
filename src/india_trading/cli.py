@@ -623,7 +623,8 @@ def cmd_data_fetch(args):
     if any(sym.startswith("SYNTH_") for sym in symbols):
         print("SYNTH_* are synthetic sample symbols, not NSE listings. Give real NSE symbols, e.g. INFY TCS.")
         return 2
-    jobs = [] if (args.indices or args.etf) and not args.symbols else [(symbols, args.out)]
+    # --indices/--etf alone fetch only those; with symbols or --universe the stocks come too
+    jobs = [] if (args.indices or args.etf) and not (args.symbols or args.universe) else [(symbols, args.out)]
     if args.indices:
         jobs.append((list(INDICES), s.indices_dir))
     if args.etf:
