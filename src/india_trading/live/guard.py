@@ -104,13 +104,20 @@ def main() -> int:
         root = os.environ.get("CLAUDE_PROJECT_DIR")
         if root:
             os.chdir(root)
-        from ..config import load_settings
-        from ..market_data.calendar import IST
-        from .ledger import LiveLedger
-
         event = json.loads(sys.stdin.read() or "{}")
-        settings = load_settings("config/settings.yaml")
-        result = decide(event, settings, load_tools(), LiveLedger(settings.state_path("live.db")), datetime.now(IST))
+        tools = load_tools()
+        if str(event.get("tool_name", "")) not in tools["order_tools"]:
+            # Not a classified order tool: decide() never reads settings, the
+            # ledger or the clock on this path, so skip loading them. They pull
+            # in pydantic/pandas, which can take longer than the hook timeout.
+            result = decide(event, None, tools, None, None)
+        else:
+            from ..config import load_settings
+            from ..market_data.calendar import IST
+            from .ledger import LiveLedger
+
+            settings = load_settings("config/settings.yaml")
+            result = decide(event, settings, tools, LiveLedger(settings.state_path("live.db")), datetime.now(IST))
     except Exception as e:  # fail closed
         result = _out("deny", f"live guard error ({type(e).__name__}: {e}); blocked")
     if result:

@@ -50,9 +50,15 @@ def _works(py: Path) -> bool:
         return False
 
 
-def _have_deps() -> bool:
+def _have_deps(guard: bool = False) -> bool:
     try:
-        import numpy, pandas, pydantic, yaml  # noqa: F401
+        if guard:
+            # The guard only needs PyYAML to decide read-only/unclassified tools.
+            # Order tools import the rest lazily; a missing package there raises
+            # inside the guard, which denies (fail closed).
+            import yaml  # noqa: F401
+        else:
+            import numpy, pandas, pydantic, yaml  # noqa: F401
         return True
     except ImportError:
         return False
@@ -80,7 +86,7 @@ def main(argv: list[str]) -> int:
     guard = argv[:1] == ["--guard"]
     if argv[:1] == ["--setup"]:
         return _setup()
-    if not _have_deps():
+    if not _have_deps(guard):
         if not os.environ.get("INDIA_TRADING_RELAUNCHED"):
             here = Path(sys.executable).resolve()
             for py in (_py(user_venv()), _py(ROOT / ".venv")):

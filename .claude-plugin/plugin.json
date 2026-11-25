@@ -1,6 +1,6 @@
 {
   "name": "india-trading-skill",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "NSE cash-equity research, risk control and PAPER trading with Groww charges: 27 skills (regime, sectors, Nifty 500 screener, technical + fundamental stock analysis, strategy lab, planner, portfolio review, alerts, allocation, daily routine, autopilot), 6 read-only agents (news & SEBI circulars, results, FII/DII flows, scenarios, critic, auditor), a capital floor, a tested market gate, and a real-money desk locked behind graduation and a guard hook.",
   "author": {
     "name": "Pranav Guttal"

@@ -8,7 +8,7 @@ if [ -n "$INDIA_TRADING_VENV" ]; then UV="$INDIA_TRADING_VENV"
 elif [ -n "$LOCALAPPDATA" ]; then UV="$LOCALAPPDATA/india-trading/venv"
 else UV="${XDG_DATA_HOME:-$HOME/.local/share}/india-trading/venv"; fi
 for PY in python python3 "$UV/Scripts/python.exe" "$UV/bin/python" "$ROOT/.venv/Scripts/python.exe" "$ROOT/.venv/bin/python"; do
-  if command -v "$PY" >/dev/null 2>&1 && "$PY" -c "import numpy, pandas, pydantic, yaml" >/dev/null 2>&1; then
+  if command -v "$PY" >/dev/null 2>&1 && "$PY" -c "import yaml" >/dev/null 2>&1; then
     exec "$PY" "$ROOT/scripts/india.py" --guard
   fi
 done
